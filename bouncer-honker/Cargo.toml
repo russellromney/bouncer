@@ -1,0 +1,8 @@
+[package]
+name = "bouncer-honker"
+version = "0.1.0"
+edition = "2021"
+description = "Rust core for Bouncer, a lease and coordination library on top of Honker."
+license = "MIT"
+
+[dependencies]
