@@ -6,9 +6,21 @@ Bouncer should be the sharpest "who owns this right now?" wrapper on top of Honk
 
 Its job is not to become a scheduler or workflow system. Its job is to provide a durable lease with expiry and fencing in the same SQLite file the app already uses.
 
+## Intent artifacts
+
+- `SYSTEM.md` is the current English model of Bouncer.
+- `CHANGELOG.md` records what has landed.
+- future meaningful changes should add `.intent/` records with spec diffs, plans, and `reviews_and_decisions.md`.
+
 ## Current status
 
-This repo is a stub.
+The repo now has a real Phase 001 Rust core:
+
+- `bouncer-honker` owns the first SQLite schema
+- the core contract exposes `inspect`, `claim`, `renew`, and `release`
+- fencing tokens are monotonic across expiry, release, and re-claim
+- Rust tests pin the current semantics
+- bindings do not exist yet
 
 The intended model is:
 
@@ -19,12 +31,12 @@ The intended model is:
 - `bouncer`
   thin language bindings
 
-## First build steps
+## Next build steps
 
-1. Define the resource / lease / fencing schema.
-2. Write the SQLite contract in `bouncer-honker`.
-3. Keep the initial binding tiny: open DB, claim, renew, release, inspect.
-4. Add one binding first, then expand only if the contract feels stable.
+1. Add one tiny binding that delegates directly to the Rust core contract.
+2. Decide whether the first public binding should expose explicit `now_ms` or hide it behind friendlier helpers.
+3. Re-evaluate whether a SQLite loadable-extension surface should arrive after the binding, not before.
+4. Explore how Honker scheduler ownership could eventually depend on Bouncer without introducing circular product boundaries.
 
 ## V1 nouns
 
