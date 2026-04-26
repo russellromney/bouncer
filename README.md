@@ -27,9 +27,11 @@ ownership and other single-machine coordination.
 
 - repo-level docs for current intent and future direction
 - a real Phase 001 `bouncer-honker` core crate
+- a first Rust wrapper crate in `packages/bouncer`
 - a SQLite schema bootstrap plus Rust `claim` / `renew` / `release` / `inspect`
 - Rust tests that pin the initial lease semantics
-- no binding implementation yet
+- wrapper tests for explicit bootstrap and wrapper/core interoperability
+- wrapper convenience methods that stay thin and keep explicit-time control in the core
 
 ## V1 shape
 

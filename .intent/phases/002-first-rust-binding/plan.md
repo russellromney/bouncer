@@ -51,14 +51,25 @@ forces a better one:
 - the binding should use system time by default
 - the explicit-time core remains public in `bouncer-honker` for callers
   that need deterministic control
-- bootstrap should happen through the binding open path or an explicit
-  helper, but not by hidden global side effect
-- result types may wrap or re-export the core result shapes as long as
-  the semantics stay unchanged
+- bootstrap should be explicit and idempotent, not a hidden constructor
+  side effect
+- the binding should support both an owned wrapper and a borrowed wrapper
+  around an existing `rusqlite::Connection`
+- the binding should re-export core result shapes rather than invent a
+  parallel taxonomy
+- Phase 002 should not silently tune `journal_mode`, `busy_timeout`, or
+  other SQLite pragmas; connection policy stays with the caller unless a
+  later phase introduces that explicitly
+- Phase 002 wrapper methods do not need to expose time for ordering.
+  Time is for expiry; ordering and stale-actor safety come from SQLite
+  writer serialization plus fencing tokens.
+- deterministic time control remains available through the explicit-time
+  core in `bouncer-honker`; a wrapper-level clock seam is a later
+  decision if the simulation direction becomes concrete
 
 ## Proposed public shape
 
-Start with one small wrapper type, probably something like:
+Start with one small owned wrapper type plus one borrowed wrapper:
 
 ```rust
 pub struct Bouncer {
@@ -66,15 +77,19 @@ pub struct Bouncer {
 }
 ```
 
-Or, if implementation argues for it, a borrowed/owned split such as:
-
-- `Bouncer`
-- `BouncerRef<'a>`
+```rust
+pub struct BouncerRef<'a> {
+    conn: &'a rusqlite::Connection,
+}
+```
 
 Suggested surface:
 
 - `Bouncer::open(path) -> Result<Self>`
-- `Bouncer::from_connection(conn) -> Result<Self>` or a close variant
+- `Bouncer::bootstrap(&self) -> Result<()>`
+- `Bouncer::as_ref(&self) -> BouncerRef<'_>`
+- `BouncerRef::new(conn: &rusqlite::Connection) -> Self`
+- `BouncerRef::bootstrap(&self) -> Result<()>`
 - `inspect(name) -> Result<Option<LeaseInfo>>`
 - `claim(name, owner, ttl) -> Result<ClaimResult>`
 - `renew(name, owner, ttl) -> Result<RenewResult>`
@@ -87,14 +102,14 @@ stays thin and obvious.
 
 Phase 001 intentionally required explicit `now_ms` injection.
 
-Phase 002 should make normal usage friendlier:
+Phase 002 should make normal usage friendlier while keeping the wrapper
+small:
 
 - wrapper methods use system time internally
-- core explicit-time functions remain the source of truth
-
-If implementation wants explicit wrapper variants like `claim_at(...)`
-for advanced callers, that is acceptable, but Phase 002 does not require
-them.
+- core explicit-time functions remain the source of truth underneath
+- wrapper tests should stay narrow around the system-time path
+- deterministic time-sensitive tests continue at the core layer in
+  Phase 002
 
 ## Build order
 
@@ -108,6 +123,7 @@ them.
 
 - choose the smallest wrapper type that feels honest
 - make open/bootstrap behavior explicit
+- commit to owned plus borrowed wrapper types
 - avoid hiding SQLite too much
 
 ### 3. Thin method delegation
@@ -119,18 +135,36 @@ them.
 
 ### 4. Error model
 
-- decide whether the wrapper re-exports core errors or wraps them
+- re-export core errors and result shapes where practical
 - avoid a second deep error taxonomy
+- do not add wrapper-only semantic enums unless implementation forces it
 
-### 5. Tests
+### 5. Bootstrap and connection policy
+
+- `open(path)` opens a plain rusqlite connection
+- `bootstrap()` is explicit and idempotent
+- do not silently set `journal_mode`, `busy_timeout`, or other pragmas
+- keep SQLite connection policy with the caller in Phase 002
+- if test setup needs connection settings for reliability, put them in a
+  test-only helper and document them as harness configuration rather
+  than product behavior
+
+### 6. Tests
 
 - open a database through the binding and perform a full lease cycle
+- verify `open(path)` does not bootstrap implicitly
+- verify wrapper methods fail cleanly before `bootstrap()`
 - verify that data written through the binding is visible to the core
 - verify that data written through the core is visible to the binding
-- pin the wrapper's system-time path without sleeping or flaky timing
-  where possible
+- verify interop across separate SQLite connections to the same file
+- pin fencing-token monotonicity across a wrapper claim and a raw-core
+  claim on the same file
+- test wrapper bootstrap idempotence
+- test TTL-rejection parity with the core
+- keep wrapper system-time tests narrow and non-flaky
+- keep time-sensitive semantic tests at the core layer in Phase 002
 
-### 6. Docs
+### 7. Docs
 
 - update `packages/bouncer/README.md`
 - update the repo README if the new binding surface is ready to mention
@@ -141,6 +175,7 @@ them.
 - `packages/bouncer/Cargo.toml`
 - `packages/bouncer/src/lib.rs`
 - `packages/bouncer/README.md`
+- wrapper test files
 - Rust tests for the new crate
 
 ## Areas that should not be touched
@@ -149,12 +184,22 @@ them.
 - any distributed coordination story
 - SQL helper surfaces
 - non-Rust bindings
+- hidden connection-policy changes
 
 ## Risks and assumptions
 
 - it is easy for a "thin" binding to become a second interpretation
   layer, so the wrapper should stay visually close to the core
-- time handling can get flaky if tests depend on wall-clock behavior too
-  loosely
+- time handling gets flaky quickly if the wrapper depends too much on
+  wall clock behavior, which is why the wrapper should not try to prove
+  fine-grained ordering via time
+- an implicit bootstrap in `open(path)` would be convenient and also
+  easy to regret once callers already have their own migration story
+- choosing the Rust wrapper shape now will constrain future non-Rust
+  bindings, so Phase 002 should make the shape explicit instead of
+  punting
+- if future deterministic simulation wants a wrapper-level `Clock` seam,
+  that should land as its own explicit decision or phase rather than
+  sneaking into this one
 - if the wrapper shape gets awkward quickly, that is a sign to keep it
   smaller rather than to add more helper magic
