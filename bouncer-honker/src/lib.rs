@@ -132,57 +132,8 @@ pub fn claim(
     now_ms: i64,
     ttl_ms: i64,
 ) -> Result<ClaimResult> {
-    let lease_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
     let tx = begin_immediate(conn)?;
-
-    let result = match load_resource(&tx, name)? {
-        None => {
-            tx.execute(
-                "INSERT INTO bouncer_resources (
-                   name,
-                   owner,
-                   token,
-                   lease_expires_at_ms,
-                   created_at_ms,
-                   updated_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![name, owner, 1_i64, lease_expires_at_ms, now_ms, now_ms],
-            )?;
-
-            ClaimResult::Acquired(LeaseInfo {
-                name: name.to_owned(),
-                owner: owner.to_owned(),
-                token: 1,
-                lease_expires_at_ms,
-            })
-        }
-        Some(row) => match row.current_lease(now_ms)? {
-            Some(current) => ClaimResult::Busy(current),
-            None => {
-                let next_token = row
-                    .token
-                    .checked_add(1)
-                    .ok_or_else(|| Error::TokenOverflow(row.name.clone()))?;
-
-                tx.execute(
-                    "UPDATE bouncer_resources
-                     SET owner = ?2,
-                         token = ?3,
-                         lease_expires_at_ms = ?4,
-                         updated_at_ms = ?5
-                     WHERE name = ?1",
-                    params![name, owner, next_token, lease_expires_at_ms, now_ms],
-                )?;
-
-                ClaimResult::Acquired(LeaseInfo {
-                    name: row.name,
-                    owner: owner.to_owned(),
-                    token: next_token,
-                    lease_expires_at_ms,
-                })
-            }
-        },
-    };
+    let result = claim_in_tx(&tx, name, owner, now_ms, ttl_ms)?;
 
     tx.commit()?;
     Ok(result)
@@ -196,32 +147,8 @@ pub fn renew(
     now_ms: i64,
     ttl_ms: i64,
 ) -> Result<RenewResult> {
-    let lease_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
     let tx = begin_immediate(conn)?;
-
-    let result = match load_resource(&tx, name)? {
-        None => RenewResult::Rejected { current: None },
-        Some(row) => match row.current_lease(now_ms)? {
-            Some(current) if current.owner == owner => {
-                tx.execute(
-                    "UPDATE bouncer_resources
-                     SET lease_expires_at_ms = ?2,
-                         updated_at_ms = ?3
-                     WHERE name = ?1",
-                    params![name, lease_expires_at_ms, now_ms],
-                )?;
-
-                RenewResult::Renewed(LeaseInfo {
-                    lease_expires_at_ms,
-                    ..current
-                })
-            }
-            Some(current) => RenewResult::Rejected {
-                current: Some(current),
-            },
-            None => RenewResult::Rejected { current: None },
-        },
-    };
+    let result = renew_in_tx(&tx, name, owner, now_ms, ttl_ms)?;
 
     tx.commit()?;
     Ok(result)
@@ -230,12 +157,128 @@ pub fn renew(
 /// Release a currently-live lease owned by `owner`.
 pub fn release(conn: &Connection, name: &str, owner: &str, now_ms: i64) -> Result<ReleaseResult> {
     let tx = begin_immediate(conn)?;
+    let result = release_in_tx(&tx, name, owner, now_ms)?;
 
-    let result = match load_resource(&tx, name)? {
-        None => ReleaseResult::Rejected { current: None },
+    tx.commit()?;
+    Ok(result)
+}
+
+/// Attempt to claim a resource using the caller's current transaction.
+///
+/// Precondition: `conn` is already inside the transaction or savepoint
+/// that should own atomicity for this mutation.
+pub(crate) fn claim_in_tx(
+    conn: &Connection,
+    name: &str,
+    owner: &str,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> Result<ClaimResult> {
+    let lease_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
+
+    match load_resource(conn, name)? {
+        None => {
+            conn.execute(
+                "INSERT INTO bouncer_resources (
+                   name,
+                   owner,
+                   token,
+                   lease_expires_at_ms,
+                   created_at_ms,
+                   updated_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![name, owner, 1_i64, lease_expires_at_ms, now_ms, now_ms],
+            )?;
+
+            Ok(ClaimResult::Acquired(LeaseInfo {
+                name: name.to_owned(),
+                owner: owner.to_owned(),
+                token: 1,
+                lease_expires_at_ms,
+            }))
+        }
+        Some(row) => match row.current_lease(now_ms)? {
+            Some(current) => Ok(ClaimResult::Busy(current)),
+            None => {
+                let next_token = row
+                    .token
+                    .checked_add(1)
+                    .ok_or_else(|| Error::TokenOverflow(row.name.clone()))?;
+
+                conn.execute(
+                    "UPDATE bouncer_resources
+                     SET owner = ?2,
+                         token = ?3,
+                         lease_expires_at_ms = ?4,
+                         updated_at_ms = ?5
+                     WHERE name = ?1",
+                    params![name, owner, next_token, lease_expires_at_ms, now_ms],
+                )?;
+
+                Ok(ClaimResult::Acquired(LeaseInfo {
+                    name: row.name,
+                    owner: owner.to_owned(),
+                    token: next_token,
+                    lease_expires_at_ms,
+                }))
+            }
+        },
+    }
+}
+
+/// Renew a lease using the caller's current transaction.
+///
+/// Precondition: `conn` is already inside the transaction or savepoint
+/// that should own atomicity for this mutation.
+pub(crate) fn renew_in_tx(
+    conn: &Connection,
+    name: &str,
+    owner: &str,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> Result<RenewResult> {
+    let lease_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
+
+    match load_resource(conn, name)? {
+        None => Ok(RenewResult::Rejected { current: None }),
         Some(row) => match row.current_lease(now_ms)? {
             Some(current) if current.owner == owner => {
-                tx.execute(
+                conn.execute(
+                    "UPDATE bouncer_resources
+                     SET lease_expires_at_ms = ?2,
+                         updated_at_ms = ?3
+                     WHERE name = ?1",
+                    params![name, lease_expires_at_ms, now_ms],
+                )?;
+
+                Ok(RenewResult::Renewed(LeaseInfo {
+                    lease_expires_at_ms,
+                    ..current
+                }))
+            }
+            Some(current) => Ok(RenewResult::Rejected {
+                current: Some(current),
+            }),
+            None => Ok(RenewResult::Rejected { current: None }),
+        },
+    }
+}
+
+/// Release a lease using the caller's current transaction.
+///
+/// Precondition: `conn` is already inside the transaction or savepoint
+/// that should own atomicity for this mutation.
+pub(crate) fn release_in_tx(
+    conn: &Connection,
+    name: &str,
+    owner: &str,
+    now_ms: i64,
+) -> Result<ReleaseResult> {
+    match load_resource(conn, name)? {
+        None => Ok(ReleaseResult::Rejected { current: None }),
+        Some(row) => match row.current_lease(now_ms)? {
+            Some(current) if current.owner == owner => {
+                conn.execute(
                     "UPDATE bouncer_resources
                      SET owner = NULL,
                          lease_expires_at_ms = NULL,
@@ -244,32 +287,36 @@ pub fn release(conn: &Connection, name: &str, owner: &str, now_ms: i64) -> Resul
                     params![name, now_ms],
                 )?;
 
-                ReleaseResult::Released {
+                Ok(ReleaseResult::Released {
                     name: current.name,
                     token: current.token,
-                }
+                })
             }
-            Some(current) => ReleaseResult::Rejected {
+            Some(current) => Ok(ReleaseResult::Rejected {
                 current: Some(current),
-            },
-            None => ReleaseResult::Rejected { current: None },
+            }),
+            None => Ok(ReleaseResult::Rejected { current: None }),
         },
-    };
-
-    tx.commit()?;
-    Ok(result)
+    }
 }
 
 /// Register all `bouncer_*` scalar functions on `conn`.
 ///
-/// Mutating SQL helpers (`claim`, `renew`, `release`) are autocommit-mode
-/// helpers. They delegate to the same core functions as Rust callers, and
-/// those core functions open `BEGIN IMMEDIATE` transactions internally.
+/// Mutating SQL helpers (`claim`, `renew`, `release`) use one of two paths:
 ///
-/// That means `SELECT bouncer_claim(...)` works in normal autocommit mode, but
-/// calling it from inside an already-open explicit SQL transaction will fail
-/// with SQLite's nested-transaction error rather than silently weakening the
-/// locking model.
+/// - in autocommit mode, they delegate to the same public core helpers as
+///   direct Rust callers, which open `BEGIN IMMEDIATE`
+/// - inside an already-open transaction or savepoint, they reuse the current
+///   connection state through the `*_in_tx` helpers instead of attempting a
+///   nested transaction
+///
+/// The second path means lock-upgrade timing follows the caller's outer
+/// transaction mode. A caller that wants the old up-front writer claim inside
+/// a transaction should begin that outer transaction with `BEGIN IMMEDIATE`.
+///
+/// `ctx.get_connection()` is still the right seam here because these SQL
+/// helpers intentionally operate on the caller's current connection and
+/// transaction context rather than opening a sibling handle.
 pub fn attach_bouncer_functions(conn: &Connection) -> rusqlite::Result<()> {
     conn.create_scalar_function("bouncer_bootstrap", 0, FunctionFlags::SQLITE_UTF8, |ctx| {
         let db = unsafe { ctx.get_connection() }?;
@@ -284,7 +331,14 @@ pub fn attach_bouncer_functions(conn: &Connection) -> rusqlite::Result<()> {
         let now_ms: i64 = ctx.get(3)?;
         let db = unsafe { ctx.get_connection() }?;
 
-        match claim(&db, &name, &owner, now_ms, ttl_ms).map_err(to_sql_err)? {
+        let result = if db.is_autocommit() {
+            claim(&db, &name, &owner, now_ms, ttl_ms)
+        } else {
+            claim_in_tx(&db, &name, &owner, now_ms, ttl_ms)
+        }
+        .map_err(to_sql_err)?;
+
+        match result {
             ClaimResult::Acquired(lease) => Ok(Some(lease.token)),
             ClaimResult::Busy(_) => Ok(None),
         }
@@ -297,7 +351,14 @@ pub fn attach_bouncer_functions(conn: &Connection) -> rusqlite::Result<()> {
         let now_ms: i64 = ctx.get(3)?;
         let db = unsafe { ctx.get_connection() }?;
 
-        match renew(&db, &name, &owner, now_ms, ttl_ms).map_err(to_sql_err)? {
+        let result = if db.is_autocommit() {
+            renew(&db, &name, &owner, now_ms, ttl_ms)
+        } else {
+            renew_in_tx(&db, &name, &owner, now_ms, ttl_ms)
+        }
+        .map_err(to_sql_err)?;
+
+        match result {
             RenewResult::Renewed(lease) => Ok(Some(lease.token)),
             RenewResult::Rejected { .. } => Ok(None),
         }
@@ -309,7 +370,14 @@ pub fn attach_bouncer_functions(conn: &Connection) -> rusqlite::Result<()> {
         let now_ms: i64 = ctx.get(2)?;
         let db = unsafe { ctx.get_connection() }?;
 
-        match release(&db, &name, &owner, now_ms).map_err(to_sql_err)? {
+        let result = if db.is_autocommit() {
+            release(&db, &name, &owner, now_ms)
+        } else {
+            release_in_tx(&db, &name, &owner, now_ms)
+        }
+        .map_err(to_sql_err)?;
+
+        match result {
             ReleaseResult::Released { .. } => Ok(1i64),
             ReleaseResult::Rejected { .. } => Ok(0i64),
         }
@@ -412,6 +480,21 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory sqlite");
         attach_bouncer_functions(&conn).expect("attach bouncer sql functions");
         conn
+    }
+
+    fn create_business_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE business_events (
+               id INTEGER PRIMARY KEY,
+               note TEXT NOT NULL
+             );",
+        )
+        .expect("create business_events");
+    }
+
+    fn business_event_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM business_events", [], |row| row.get(0))
+            .expect("count business events")
     }
 
     fn assert_live_lease(
@@ -745,7 +828,76 @@ mod tests {
     }
 
     #[test]
-    fn mutating_sql_helpers_fail_inside_explicit_transaction() {
+    fn mutating_sql_helpers_commit_with_explicit_transaction() {
+        let conn = open_sql_db();
+        create_business_table(&conn);
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        conn.execute_batch("BEGIN").unwrap();
+        conn.execute(
+            "INSERT INTO business_events(note) VALUES (?1)",
+            params!["claimed in tx"],
+        )
+        .unwrap();
+
+        let claimed = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("claim inside explicit transaction should succeed");
+        assert_eq!(claimed, Some(1));
+
+        conn.execute_batch("COMMIT").unwrap();
+
+        assert_eq!(business_event_count(&conn), 1);
+        assert_eq!(
+            owner(&conn, "scheduler", 120).unwrap(),
+            Some("worker-a".to_owned())
+        );
+        assert_eq!(token(&conn, "scheduler").unwrap(), Some(1));
+    }
+
+    #[test]
+    fn mutating_sql_helpers_rollback_with_explicit_transaction() {
+        let conn = open_sql_db();
+        create_business_table(&conn);
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        conn.execute_batch("BEGIN").unwrap();
+        conn.execute(
+            "INSERT INTO business_events(note) VALUES (?1)",
+            params!["rolled back"],
+        )
+        .unwrap();
+
+        let claimed = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("claim inside explicit transaction should succeed");
+        assert_eq!(claimed, Some(1));
+
+        conn.execute_batch("ROLLBACK").unwrap();
+
+        assert_eq!(business_event_count(&conn), 0);
+        assert_eq!(owner(&conn, "scheduler", 120).unwrap(), None);
+        assert_eq!(token(&conn, "scheduler").unwrap(), None);
+    }
+
+    #[test]
+    fn multiple_sql_mutators_commit_together_inside_explicit_transaction() {
         let conn = open_sql_db();
 
         let bootstrapped: i64 = conn
@@ -755,21 +907,196 @@ mod tests {
 
         conn.execute_batch("BEGIN").unwrap();
 
-        let err = conn
+        let scheduler = conn
             .query_row(
                 "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
                 params!["scheduler", "worker-a", 50_i64, 100_i64],
                 |row| row.get::<_, Option<i64>>(0),
             )
-            .expect_err("claim inside explicit transaction should fail");
+            .unwrap();
+        let janitor = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["janitor", "worker-b", 60_i64, 110_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap();
+        assert_eq!(scheduler, Some(1));
+        assert_eq!(janitor, Some(1));
 
-        let message = err.to_string();
-        assert!(
-            message.contains("cannot start a transaction within a transaction"),
-            "unexpected nested-transaction error: {message}"
+        conn.execute_batch("COMMIT").unwrap();
+
+        assert_eq!(
+            owner(&conn, "scheduler", 120).unwrap(),
+            Some("worker-a".to_owned())
         );
+        assert_eq!(
+            owner(&conn, "janitor", 120).unwrap(),
+            Some("worker-b".to_owned())
+        );
+    }
+
+    #[test]
+    fn multiple_sql_mutators_rollback_together_inside_explicit_transaction() {
+        let conn = open_sql_db();
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        conn.execute_batch("BEGIN").unwrap();
+
+        let scheduler = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap();
+        let janitor = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["janitor", "worker-b", 60_i64, 110_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap();
+        assert_eq!(scheduler, Some(1));
+        assert_eq!(janitor, Some(1));
 
         conn.execute_batch("ROLLBACK").unwrap();
+
+        assert_eq!(owner(&conn, "scheduler", 120).unwrap(), None);
+        assert_eq!(owner(&conn, "janitor", 120).unwrap(), None);
+        assert_eq!(token(&conn, "scheduler").unwrap(), None);
+        assert_eq!(token(&conn, "janitor").unwrap(), None);
+    }
+
+    #[test]
+    fn sql_read_helpers_work_inside_explicit_transaction() {
+        let conn = open_sql_db();
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        conn.execute_batch("BEGIN").unwrap();
+
+        let claimed = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap();
+        assert_eq!(claimed, Some(1));
+
+        let owner_in_tx: Option<String> = conn
+            .query_row(
+                "SELECT bouncer_owner(?1, ?2)",
+                params!["scheduler", 120_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let token_in_tx: Option<i64> = conn
+            .query_row("SELECT bouncer_token(?1)", params!["scheduler"], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        assert_eq!(owner_in_tx.as_deref(), Some("worker-a"));
+        assert_eq!(token_in_tx, Some(1));
+
+        conn.execute_batch("ROLLBACK").unwrap();
+    }
+
+    #[test]
+    fn sql_mutators_preserve_lease_semantics_inside_explicit_transaction() {
+        let conn = open_sql_db();
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        conn.execute_batch("BEGIN").unwrap();
+
+        let first_claim: Option<i64> = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let busy_claim: Option<i64> = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-b", 30_i64, 120_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let takeover_claim: Option<i64> = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-b", 30_i64, 151_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let released: i64 = conn
+            .query_row(
+                "SELECT bouncer_release(?1, ?2, ?3)",
+                params!["scheduler", "worker-b", 160_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let reclaimed: Option<i64> = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-c", 40_i64, 161_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(first_claim, Some(1));
+        assert_eq!(busy_claim, None);
+        assert_eq!(takeover_claim, Some(2));
+        assert_eq!(released, 1);
+        assert_eq!(reclaimed, Some(3));
+
+        conn.execute_batch("COMMIT").unwrap();
+
+        assert_eq!(
+            owner(&conn, "scheduler", 170).unwrap(),
+            Some("worker-c".to_owned())
+        );
+        assert_eq!(token(&conn, "scheduler").unwrap(), Some(3));
+    }
+
+    #[test]
+    fn sql_mutators_work_inside_savepoint_context() {
+        let conn = open_sql_db();
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        conn.execute_batch("SAVEPOINT lease_ops").unwrap();
+
+        let claimed = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap();
+        assert_eq!(claimed, Some(1));
+
+        conn.execute_batch("ROLLBACK TO lease_ops").unwrap();
+        conn.execute_batch("RELEASE lease_ops").unwrap();
+
+        assert_eq!(owner(&conn, "scheduler", 120).unwrap(), None);
     }
 
     fn release_after_claim(conn: &Connection) {

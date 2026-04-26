@@ -33,6 +33,7 @@ ownership and other single-machine coordination.
 - Rust tests that pin the initial lease semantics
 - wrapper tests for explicit bootstrap and wrapper/core interoperability
 - SQL function registration in the core plus SQL/Rust interop tests on one file
+- transactional SQL mutators that can participate in an already-open caller transaction
 - wrapper convenience methods that stay thin and keep explicit-time control in the core
 
 ## V1 shape
@@ -57,6 +58,10 @@ The first SQLite-facing surface now exists via `bouncer-extension`:
 The SQL surface stays explicit about time. Higher-level bindings can
 offer convenience clocks later, but the SQLite-facing contract should
 not hide `now_ms` inside the extension.
+
+Mutating SQL helpers can also participate in a caller-owned explicit
+transaction, so a business write and a Bouncer lease mutation can commit
+or roll back together on one connection.
 
 ## Non-goals
 

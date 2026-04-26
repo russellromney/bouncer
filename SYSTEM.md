@@ -36,7 +36,11 @@ Bouncer is a single-machine lease and ownership primitive on top of Honker.
   - `bouncer_token(name)`
 - SQL and Rust interoperate against the same database file and share the same lease semantics and fencing state.
 - The SQL surface keeps time explicit. It does not read `now()` from inside SQLite.
-- SQL mutators are autocommit-mode helpers. Calling `bouncer_claim`, `bouncer_renew`, or `bouncer_release` inside an already-open explicit SQL transaction fails with SQLite's nested-transaction error rather than silently changing the locking model.
+- SQL mutators now work both in autocommit mode and inside an already-open explicit transaction or savepoint on the caller's connection.
+- In autocommit mode, mutating SQL helpers preserve the direct Rust path's `BEGIN IMMEDIATE` behavior.
+- Inside a caller-owned transaction or savepoint, mutating SQL helpers reuse the current transaction state rather than opening a nested transaction.
+- In that in-transaction path, lock-upgrade timing follows the caller's outer transaction mode rather than forcing a new `BEGIN IMMEDIATE`.
+- Core tests now prove commit/rollback behavior, multi-mutator transactions, read helpers inside a transaction, semantic-stress behavior inside a transaction, and a savepoint rollback path.
 
 ## Current intent
 

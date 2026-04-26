@@ -43,9 +43,14 @@ Raw SQLite C API / SQL:
 
 ## Transaction model
 
-`bouncer_claim`, `bouncer_renew`, and `bouncer_release` are autocommit-mode
-helpers. Internally they open `BEGIN IMMEDIATE` transactions through the
-shared Rust core.
+`bouncer_claim`, `bouncer_renew`, and `bouncer_release` work in both:
+
+- normal autocommit mode
+- an already-open explicit transaction or savepoint on the caller's
+  connection
+
+In autocommit mode they delegate to the same shared Rust helpers as
+direct callers, which open `BEGIN IMMEDIATE`.
 
 That means this works:
 
@@ -53,7 +58,7 @@ That means this works:
 SELECT bouncer_claim('scheduler', 'worker-a', 5000, 100);
 ```
 
-But this does not:
+And this now works too:
 
 ```sql
 BEGIN;
@@ -61,5 +66,10 @@ SELECT bouncer_claim('scheduler', 'worker-a', 5000, 100);
 COMMIT;
 ```
 
-Inside an already-open explicit transaction, SQLite will return its
-nested-transaction error instead of weakening the locking model.
+Inside an already-open transaction, Bouncer reuses the caller's current
+transaction state instead of attempting a nested `BEGIN IMMEDIATE`.
+
+One important caveat: lock-upgrade timing in that path follows the
+caller’s outer transaction mode. If you want the same up-front writer
+claim as the direct Rust path, start your transaction with
+`BEGIN IMMEDIATE` yourself.

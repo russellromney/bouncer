@@ -25,6 +25,7 @@ The repo now has a real Phase 001 Rust core:
 - a first SQLite loadable-extension crate now exists in `bouncer-extension`
 - the first `bouncer_*` SQL surface reuses `bouncer-honker` semantics and keeps `now_ms` explicit
 - SQL/Rust interop is now proven on one database file
+- SQL mutators now participate in caller-owned explicit transactions and savepoints instead of failing with SQLite's nested-transaction error
 
 The intended model is:
 
@@ -41,7 +42,7 @@ The intended model is:
 
 1. Add docs/examples that show the SQL surface and the Rust wrapper against the same file.
 2. Decide whether the next public move is another binding or Honker scheduler adoption work.
-3. Explore how Honker scheduler ownership could eventually depend on Bouncer without introducing circular product boundaries.
+3. Decide whether the in-transaction contention story should be documented only or pinned with a dedicated multi-connection test phase.
 
 ## Future proposals
 
