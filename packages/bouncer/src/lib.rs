@@ -79,29 +79,38 @@ impl<'a> BouncerRef<'a> {
     }
 
     pub fn claim(&self, name: &str, owner: &str, ttl: Duration) -> Result<ClaimResult> {
-        core::claim(
-            self.conn,
-            name,
-            owner,
-            system_now_ms()?,
-            duration_to_ttl_ms(ttl)?,
-        )
+        let now_ms = system_now_ms()?;
+        let ttl_ms = duration_to_ttl_ms(ttl)?;
+
+        (if self.conn.is_autocommit() {
+            core::claim(self.conn, name, owner, now_ms, ttl_ms)
+        } else {
+            core::claim_in_tx(self.conn, name, owner, now_ms, ttl_ms)
+        })
         .map_err(Error::from)
     }
 
     pub fn renew(&self, name: &str, owner: &str, ttl: Duration) -> Result<RenewResult> {
-        core::renew(
-            self.conn,
-            name,
-            owner,
-            system_now_ms()?,
-            duration_to_ttl_ms(ttl)?,
-        )
+        let now_ms = system_now_ms()?;
+        let ttl_ms = duration_to_ttl_ms(ttl)?;
+
+        (if self.conn.is_autocommit() {
+            core::renew(self.conn, name, owner, now_ms, ttl_ms)
+        } else {
+            core::renew_in_tx(self.conn, name, owner, now_ms, ttl_ms)
+        })
         .map_err(Error::from)
     }
 
     pub fn release(&self, name: &str, owner: &str) -> Result<ReleaseResult> {
-        core::release(self.conn, name, owner, system_now_ms()?).map_err(Error::from)
+        let now_ms = system_now_ms()?;
+
+        (if self.conn.is_autocommit() {
+            core::release(self.conn, name, owner, now_ms)
+        } else {
+            core::release_in_tx(self.conn, name, owner, now_ms)
+        })
+        .map_err(Error::from)
     }
 }
 
@@ -162,6 +171,21 @@ mod tests {
         configure_test_connection(&conn);
         attach_sql_functions(&conn);
         conn
+    }
+
+    fn create_business_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE business_events (
+               id INTEGER PRIMARY KEY,
+               note TEXT NOT NULL
+             );",
+        )
+        .expect("create business_events");
+    }
+
+    fn business_event_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM business_events", [], |row| row.get(0))
+            .expect("count business events")
     }
 
     fn sql_missing_schema_error(err: &rusqlite::Error) -> bool {
@@ -541,5 +565,255 @@ mod tests {
         };
 
         assert_eq!(second.token, first.token + 1);
+    }
+
+    #[test]
+    fn borrowed_claim_and_renew_commit_with_explicit_transaction() {
+        let (_tempdir, wrapper) = open_wrapper_db();
+        wrapper.bootstrap().expect("bootstrap");
+        create_business_table(&wrapper.conn);
+        let borrowed = wrapper.borrowed();
+
+        wrapper.conn.execute_batch("BEGIN").expect("begin tx");
+        wrapper
+            .conn
+            .execute(
+                "INSERT INTO business_events(note) VALUES (?1)",
+                params!["borrowed commit"],
+            )
+            .expect("insert business event");
+
+        let acquired = borrowed
+            .claim("scheduler", "worker-a", Duration::from_secs(5))
+            .expect("borrowed claim");
+        let acquired = match acquired {
+            ClaimResult::Acquired(lease) => lease,
+            ClaimResult::Busy(current) => panic!("unexpected busy lease: {current:?}"),
+        };
+
+        let renewed = borrowed
+            .renew("scheduler", "worker-a", Duration::from_secs(10))
+            .expect("borrowed renew");
+        let renewed = match renewed {
+            RenewResult::Renewed(lease) => lease,
+            RenewResult::Rejected { current } => {
+                panic!("unexpected renew rejection: {current:?}")
+            }
+        };
+        assert_eq!(renewed.token, acquired.token);
+        assert!(renewed.lease_expires_at_ms >= acquired.lease_expires_at_ms);
+
+        wrapper.conn.execute_batch("COMMIT").expect("commit tx");
+
+        assert_eq!(business_event_count(&wrapper.conn), 1);
+        let inspected = core::inspect(&wrapper.conn, "scheduler", system_now_for_core())
+            .expect("core inspect after commit");
+        assert_eq!(inspected, Some(renewed));
+    }
+
+    #[test]
+    fn borrowed_claim_rolls_back_with_explicit_transaction() {
+        let (_tempdir, wrapper) = open_wrapper_db();
+        wrapper.bootstrap().expect("bootstrap");
+        create_business_table(&wrapper.conn);
+        let borrowed = wrapper.borrowed();
+
+        wrapper.conn.execute_batch("BEGIN").expect("begin tx");
+        wrapper
+            .conn
+            .execute(
+                "INSERT INTO business_events(note) VALUES (?1)",
+                params!["borrowed rollback"],
+            )
+            .expect("insert business event");
+
+        let acquired = borrowed
+            .claim("scheduler", "worker-a", Duration::from_secs(5))
+            .expect("borrowed claim");
+        assert!(matches!(acquired, ClaimResult::Acquired(_)));
+
+        wrapper.conn.execute_batch("ROLLBACK").expect("rollback tx");
+
+        assert_eq!(business_event_count(&wrapper.conn), 0);
+        assert_eq!(
+            core::inspect(&wrapper.conn, "scheduler", system_now_for_core())
+                .expect("core inspect after rollback"),
+            None
+        );
+        assert_eq!(
+            core::token(&wrapper.conn, "scheduler").expect("core token after rollback"),
+            None
+        );
+    }
+
+    #[test]
+    fn borrowed_multi_mutator_commit_together_inside_explicit_transaction() {
+        let (_tempdir, wrapper) = open_wrapper_db();
+        wrapper.bootstrap().expect("bootstrap");
+        let borrowed = wrapper.borrowed();
+
+        wrapper.conn.execute_batch("BEGIN").expect("begin tx");
+
+        let scheduler = borrowed
+            .claim("scheduler", "worker-a", Duration::from_secs(5))
+            .expect("borrowed claim for scheduler");
+        let janitor = borrowed
+            .claim("janitor", "worker-b", Duration::from_secs(5))
+            .expect("borrowed claim for janitor");
+
+        assert!(matches!(scheduler, ClaimResult::Acquired(_)));
+        assert!(matches!(janitor, ClaimResult::Acquired(_)));
+
+        wrapper.conn.execute_batch("COMMIT").expect("commit tx");
+
+        let now_ms = system_now_for_core();
+        assert_eq!(
+            core::owner(&wrapper.conn, "scheduler", now_ms).expect("scheduler owner"),
+            Some("worker-a".to_owned())
+        );
+        assert_eq!(
+            core::owner(&wrapper.conn, "janitor", now_ms).expect("janitor owner"),
+            Some("worker-b".to_owned())
+        );
+    }
+
+    #[test]
+    fn borrowed_multi_mutator_rollback_together_inside_explicit_transaction() {
+        let (_tempdir, wrapper) = open_wrapper_db();
+        wrapper.bootstrap().expect("bootstrap");
+        let borrowed = wrapper.borrowed();
+
+        wrapper.conn.execute_batch("BEGIN").expect("begin tx");
+
+        let scheduler = borrowed
+            .claim("scheduler", "worker-a", Duration::from_secs(5))
+            .expect("borrowed claim for scheduler");
+        let janitor = borrowed
+            .claim("janitor", "worker-b", Duration::from_secs(5))
+            .expect("borrowed claim for janitor");
+
+        assert!(matches!(scheduler, ClaimResult::Acquired(_)));
+        assert!(matches!(janitor, ClaimResult::Acquired(_)));
+
+        wrapper.conn.execute_batch("ROLLBACK").expect("rollback tx");
+
+        let now_ms = system_now_for_core();
+        assert_eq!(
+            core::owner(&wrapper.conn, "scheduler", now_ms).expect("scheduler owner"),
+            None
+        );
+        assert_eq!(
+            core::owner(&wrapper.conn, "janitor", now_ms).expect("janitor owner"),
+            None
+        );
+        assert_eq!(
+            core::token(&wrapper.conn, "scheduler").expect("scheduler token"),
+            None
+        );
+        assert_eq!(
+            core::token(&wrapper.conn, "janitor").expect("janitor token"),
+            None
+        );
+    }
+
+    #[test]
+    fn borrowed_mutators_preserve_lease_semantics_inside_explicit_transaction() {
+        let (_tempdir, wrapper) = open_wrapper_db();
+        wrapper.bootstrap().expect("bootstrap");
+        let borrowed = wrapper.borrowed();
+
+        wrapper.conn.execute_batch("BEGIN").expect("begin tx");
+
+        let first_claim = borrowed
+            .claim("scheduler", "worker-a", Duration::from_millis(20))
+            .expect("first borrowed claim");
+        let first_claim = match first_claim {
+            ClaimResult::Acquired(lease) => lease,
+            ClaimResult::Busy(current) => panic!("unexpected busy lease: {current:?}"),
+        };
+
+        let busy_claim = borrowed
+            .claim("scheduler", "worker-b", Duration::from_millis(20))
+            .expect("busy borrowed claim");
+        match busy_claim {
+            ClaimResult::Busy(current) => {
+                assert_eq!(current.owner, "worker-a");
+                assert_eq!(current.token, first_claim.token);
+            }
+            ClaimResult::Acquired(lease) => panic!("unexpected acquired lease: {lease:?}"),
+        }
+
+        std::thread::sleep(Duration::from_millis(30));
+
+        let takeover = borrowed
+            .claim("scheduler", "worker-b", Duration::from_millis(20))
+            .expect("takeover claim");
+        let takeover = match takeover {
+            ClaimResult::Acquired(lease) => lease,
+            ClaimResult::Busy(current) => panic!("unexpected busy lease: {current:?}"),
+        };
+        assert_eq!(takeover.token, first_claim.token + 1);
+
+        let released = borrowed
+            .release("scheduler", "worker-b")
+            .expect("borrowed release");
+        assert_eq!(
+            released,
+            ReleaseResult::Released {
+                name: "scheduler".to_owned(),
+                token: takeover.token,
+            }
+        );
+
+        let reclaimed = borrowed
+            .claim("scheduler", "worker-c", Duration::from_millis(200))
+            .expect("reclaim claim");
+        let reclaimed = match reclaimed {
+            ClaimResult::Acquired(lease) => lease,
+            ClaimResult::Busy(current) => panic!("unexpected busy lease: {current:?}"),
+        };
+        assert_eq!(reclaimed.token, takeover.token + 1);
+
+        wrapper.conn.execute_batch("COMMIT").expect("commit tx");
+
+        let inspected = core::inspect(&wrapper.conn, "scheduler", system_now_for_core())
+            .expect("core inspect after semantic stress");
+        assert_eq!(inspected, Some(reclaimed.clone()));
+        assert_eq!(
+            core::token(&wrapper.conn, "scheduler").expect("token after semantic stress"),
+            Some(reclaimed.token)
+        );
+    }
+
+    #[test]
+    fn borrowed_mutators_work_inside_savepoint_context() {
+        let (_tempdir, wrapper) = open_wrapper_db();
+        wrapper.bootstrap().expect("bootstrap");
+        let borrowed = wrapper.borrowed();
+
+        wrapper
+            .conn
+            .execute_batch("SAVEPOINT borrowed_ops")
+            .expect("begin savepoint");
+
+        let acquired = borrowed
+            .claim("scheduler", "worker-a", Duration::from_secs(5))
+            .expect("borrowed claim inside savepoint");
+        assert!(matches!(acquired, ClaimResult::Acquired(_)));
+
+        wrapper
+            .conn
+            .execute_batch("ROLLBACK TO borrowed_ops")
+            .expect("rollback to savepoint");
+        wrapper
+            .conn
+            .execute_batch("RELEASE borrowed_ops")
+            .expect("release savepoint");
+
+        assert_eq!(
+            core::owner(&wrapper.conn, "scheduler", system_now_for_core())
+                .expect("owner after savepoint"),
+            None
+        );
     }
 }

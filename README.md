@@ -1,6 +1,6 @@
 # bouncer
 
-Leases and coordination on top of Honker.
+Leases and coordination for the Honker stack.
 
 ## Summary
 
@@ -34,6 +34,8 @@ ownership and other single-machine coordination.
 - wrapper tests for explicit bootstrap and wrapper/core interoperability
 - SQL function registration in the core plus SQL/Rust interop tests on one file
 - transactional SQL mutators that can participate in an already-open caller transaction
+- borrowed Rust mutators that can participate in a caller-owned
+  transaction or savepoint without tripping nested transactions
 - wrapper convenience methods that stay thin and keep explicit-time control in the core
 
 ## V1 shape

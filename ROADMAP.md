@@ -2,7 +2,7 @@
 
 ## Summary
 
-Bouncer should be the sharpest "who owns this right now?" wrapper on top of Honker.
+Bouncer should be the sharpest "who owns this right now?" primitive for the Honker family.
 
 Its job is not to become a scheduler or workflow system. Its job is to provide a durable lease with expiry and fencing in the same SQLite file the app already uses.
 
@@ -26,6 +26,9 @@ The repo now has a real Phase 001 Rust core:
 - the first `bouncer_*` SQL surface reuses `bouncer-honker` semantics and keeps `now_ms` explicit
 - SQL/Rust interop is now proven on one database file
 - SQL mutators now participate in caller-owned explicit transactions and savepoints instead of failing with SQLite's nested-transaction error
+- deferred multi-connection writer contention is now pinned as a lock/busy failure in the in-transaction SQL path
+- borrowed Rust mutators now follow the same transaction model as the SQL extension instead of tripping nested-transaction errors on caller-owned transactions
+- the core now exposes explicit public `*_in_tx` helpers with a fail-fast transaction-state guard
 
 The intended model is:
 
@@ -40,9 +43,9 @@ The intended model is:
 
 ## Next build steps
 
-1. Add docs/examples that show the SQL surface and the Rust wrapper against the same file.
-2. Decide whether the next public move is another binding or Honker scheduler adoption work.
-3. Decide whether the in-transaction contention story should be documented only or pinned with a dedicated multi-connection test phase.
+1. Add docs/examples that show the SQL surface, owned Rust wrapper, and borrowed Rust transaction path against the same file.
+2. Make `BEGIN IMMEDIATE` the default transactional SQL example and document the three practical outcomes new users can hit: lease busy, writer-lock busy, and timeout-mediated busy.
+3. Pressure-test Bouncer by spiking one Honker scheduler ownership path on top of it, then decide whether the next public move is transaction ergonomics or another binding.
 
 ## Future proposals
 

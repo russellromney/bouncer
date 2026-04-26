@@ -15,6 +15,10 @@ It does not:
 - hide SQLite connection policy
 - use wall clock as an ordering primitive
 
+If the caller already owns a transaction or savepoint on a borrowed
+`rusqlite::Connection`, `BouncerRef` mutators participate in that
+existing boundary instead of attempting a nested transaction.
+
 Example:
 
 ```rust

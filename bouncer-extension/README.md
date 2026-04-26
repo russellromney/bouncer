@@ -61,7 +61,7 @@ SELECT bouncer_claim('scheduler', 'worker-a', 5000, 100);
 And this now works too:
 
 ```sql
-BEGIN;
+BEGIN IMMEDIATE;
 SELECT bouncer_claim('scheduler', 'worker-a', 5000, 100);
 COMMIT;
 ```
@@ -70,6 +70,8 @@ Inside an already-open transaction, Bouncer reuses the caller's current
 transaction state instead of attempting a nested `BEGIN IMMEDIATE`.
 
 One important caveat: lock-upgrade timing in that path follows the
-caller’s outer transaction mode. If you want the same up-front writer
-claim as the direct Rust path, start your transaction with
-`BEGIN IMMEDIATE` yourself.
+caller’s outer transaction mode. `BEGIN IMMEDIATE` gives you the same
+up-front writer claim as the direct Rust path. Plain `BEGIN` can still
+surface SQLite lock/busy behavior before Bouncer gets to finish the
+lease-level decision, and the user-visible behavior will also depend on
+the connection's `busy_timeout`.

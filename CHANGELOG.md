@@ -2,35 +2,95 @@
 
 ## Unreleased
 
-### Added
+### Phase 001 — core lease contract
 
-- Added the initial repo scaffold for `bouncer`.
-- Added the first real `bouncer-honker` Rust core crate implementation.
-- Added the first SQLite schema bootstrap for `bouncer_resources`.
-- Added Rust `claim`, `renew`, `release`, and time-aware `inspect` helpers.
-- Added Phase 001 tests for claim, expiry, renew, release, and monotonic fencing behavior.
-- Added the first Rust wrapper crate in `packages/bouncer`.
-- Added explicit wrapper bootstrap plus owned/borrowed wrapper types.
-- Added wrapper tests for negative bootstrap behavior, wrapper/core interop, TTL parity, and fencing-token monotonicity across wrapper/core calls.
-- Added the first SQLite loadable-extension crate in `bouncer-extension`.
-- Added the first `bouncer_*` SQL surface:
+Added:
+
+- initial repo scaffold for `bouncer`
+- first real `bouncer-honker` Rust core crate
+- SQLite bootstrap for `bouncer_resources`
+- Rust `claim`, `renew`, `release`, and time-aware `inspect` helpers
+- Phase 001 tests for claim, expiry, renew, release, and monotonic fencing behavior
+- first pass of `README.md`, `ROADMAP.md`, and `SYSTEM.md`
+- `.intent/phases/001-core-lease-contract/` with spec, plan, review/decision, and commit-trace artifacts
+
+Clarified:
+
+- Bouncer is a single-machine lease / fencing primitive for SQLite apps, not a distributed coordination system
+- Phase 001 stops at the Rust core contract and tests
+- the repo phase workflow centers on `spec-diff.md`, `plan.md`, and `reviews_and_decisions.md`
+
+### Phase 002 — first Rust wrapper
+
+Added:
+
+- first Rust wrapper crate in `packages/bouncer`
+- explicit wrapper bootstrap plus owned/borrowed wrapper types
+- wrapper tests for negative bootstrap behavior, wrapper/core interop, TTL parity, and fencing-token monotonicity across wrapper/core calls
+
+Clarified:
+
+- the Rust wrapper stays thin
+- bootstrap remains explicit
+- wall clock is expiry bookkeeping, not an ordering primitive
+
+### Phase 003 — first SQLite extension surface
+
+Added:
+
+- first SQLite loadable-extension crate in `bouncer-extension`
+- first `bouncer_*` SQL surface:
   - `bouncer_bootstrap()`
   - `bouncer_claim(name, owner, ttl_ms, now_ms)`
   - `bouncer_renew(name, owner, ttl_ms, now_ms)`
   - `bouncer_release(name, owner, now_ms)`
   - `bouncer_owner(name, now_ms)`
   - `bouncer_token(name)`
-- Added direct SQL-function tests in `bouncer-honker` and SQL/Rust interop tests in `packages/bouncer`.
-- Added transaction-aware internal `*_in_tx` lease helpers in `bouncer-honker`.
-- Added explicit-transaction, multi-mutator, read-in-transaction, semantic-stress, and savepoint SQL tests for the extension surface.
-- Added the first pass of `README.md`, `ROADMAP.md`, and `SYSTEM.md` to capture product intent before implementation.
-- Added `.intent/phases/001-core-lease-contract/` with spec, plan, review/decision, and commit-trace artifacts.
+- direct SQL-function tests in `bouncer-honker`
+- SQL/Rust interop tests in `packages/bouncer`
 
-### Changed
+Clarified:
 
-- Clarified that Bouncer is a single-machine lease / fencing primitive for SQLite apps, not a distributed coordination system.
-- Clarified that Phase 001 stops at the Rust core contract and tests; bindings remain future work.
-- Clarified the repo's phase workflow around `spec-diff.md`, `plan.md`, and `reviews_and_decisions.md`.
-- Clarified that the Rust wrapper stays thin, keeps bootstrap explicit, and treats wall clock as expiry bookkeeping rather than an ordering primitive.
-- Clarified that the SQL surface is now real, keeps `now_ms` explicit, and shares semantics with the Rust core rather than reimplementing lease logic.
-- Clarified that SQL mutators now participate in caller-owned explicit transactions and savepoints while preserving the autocommit path's `BEGIN IMMEDIATE` behavior.
+- the SQL surface is real, keeps `now_ms` explicit, and shares semantics with the Rust core rather than reimplementing lease logic
+
+### Phase 004 — transactional SQL mutators
+
+Added:
+
+- transaction-aware internal `claim_in_tx`, `renew_in_tx`, and `release_in_tx` helpers in `bouncer-honker`
+- explicit-transaction SQL tests for commit and rollback behavior
+- multi-mutator transaction tests for commit and rollback behavior
+- read-helper-in-transaction proof
+- semantic-stress SQL test inside an explicit transaction
+- savepoint rollback test for the SQL surface
+- dedicated deferred multi-connection contention test that pins a lock/busy failure in the in-transaction SQL path
+
+Changed:
+
+- `bouncer_claim`, `bouncer_renew`, and `bouncer_release` now participate in caller-owned explicit transactions and savepoints instead of failing with SQLite's nested-transaction error
+- the autocommit SQL path still preserves the direct Rust path's `BEGIN IMMEDIATE` behavior
+- the baseline docs now reflect the transactional SQL contract
+- the baseline docs now state plainly that fencing safety beyond SQLite requires downstream consumers to carry and compare Bouncer's token
+
+### Phase 005 — borrowed Rust transaction contract
+
+Added:
+
+- public `claim_in_tx`, `renew_in_tx`, and `release_in_tx` helpers in
+  `bouncer-honker`
+- `Error::NotInTransaction` fail-fast guard for public in-transaction
+  Rust helpers
+- borrowed-wrapper tests for explicit transaction commit/rollback,
+  multi-mutator commit/rollback, savepoint participation, and borrowed
+  semantic-stress behavior
+- crate-level docs in `bouncer-honker` that explain when to use the
+  transaction-owning helpers versus the caller-owned `*_in_tx` helpers
+
+Changed:
+
+- `BouncerRef::claim`, `renew`, and `release` now mirror the SQL
+  extension's transaction behavior: autocommit opens its own
+  `BEGIN IMMEDIATE`, while an already-open transaction or savepoint is
+  reused instead of triggering a nested-transaction failure
+- `BouncerRef` now uses `borrowed()` instead of the old `as_ref()`
+  method name

@@ -1,3 +1,13 @@
+//! Core lease state machine and SQLite operations for Bouncer.
+//!
+//! Use `claim`, `renew`, and `release` when this crate should open and
+//! commit its own `BEGIN IMMEDIATE` transaction for the mutation.
+//! Use `claim_in_tx`, `renew_in_tx`, and `release_in_tx` when the caller
+//! already owns the surrounding transaction or savepoint and wants Bouncer
+//! to participate in that existing atomic boundary.
+//! The two surfaces share the same lease semantics; they differ only in who
+//! owns transaction opening, commit, and lock-upgrade timing.
+//!
 use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
@@ -9,6 +19,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("database error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("connection must already be inside a transaction or savepoint")]
+    NotInTransaction,
     #[error("ttl_ms must be positive, got {0}")]
     InvalidTtlMs(i64),
     #[error("ttl_ms {ttl_ms} at now_ms {now_ms} overflows lease expiry")]
@@ -165,15 +177,22 @@ pub fn release(conn: &Connection, name: &str, owner: &str, now_ms: i64) -> Resul
 
 /// Attempt to claim a resource using the caller's current transaction.
 ///
-/// Precondition: `conn` is already inside the transaction or savepoint
-/// that should own atomicity for this mutation.
-pub(crate) fn claim_in_tx(
+/// `conn` must already be inside the transaction or savepoint that
+/// should own atomicity for this mutation, which is equivalent to
+/// `conn.is_autocommit() == false`. If that precondition is violated,
+/// this returns [`Error::NotInTransaction`] instead of silently running
+/// outside a caller-owned transaction.
+///
+/// This helper does not open or commit a transaction. Lock-upgrade
+/// timing follows the caller's outer transaction mode.
+pub fn claim_in_tx(
     conn: &Connection,
     name: &str,
     owner: &str,
     now_ms: i64,
     ttl_ms: i64,
 ) -> Result<ClaimResult> {
+    ensure_in_tx(conn)?;
     let lease_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
 
     match load_resource(conn, name)? {
@@ -228,15 +247,22 @@ pub(crate) fn claim_in_tx(
 
 /// Renew a lease using the caller's current transaction.
 ///
-/// Precondition: `conn` is already inside the transaction or savepoint
-/// that should own atomicity for this mutation.
-pub(crate) fn renew_in_tx(
+/// `conn` must already be inside the transaction or savepoint that
+/// should own atomicity for this mutation, which is equivalent to
+/// `conn.is_autocommit() == false`. If that precondition is violated,
+/// this returns [`Error::NotInTransaction`] instead of silently running
+/// outside a caller-owned transaction.
+///
+/// This helper does not open or commit a transaction. Lock-upgrade
+/// timing follows the caller's outer transaction mode.
+pub fn renew_in_tx(
     conn: &Connection,
     name: &str,
     owner: &str,
     now_ms: i64,
     ttl_ms: i64,
 ) -> Result<RenewResult> {
+    ensure_in_tx(conn)?;
     let lease_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
 
     match load_resource(conn, name)? {
@@ -266,14 +292,21 @@ pub(crate) fn renew_in_tx(
 
 /// Release a lease using the caller's current transaction.
 ///
-/// Precondition: `conn` is already inside the transaction or savepoint
-/// that should own atomicity for this mutation.
-pub(crate) fn release_in_tx(
+/// `conn` must already be inside the transaction or savepoint that
+/// should own atomicity for this mutation, which is equivalent to
+/// `conn.is_autocommit() == false`. If that precondition is violated,
+/// this returns [`Error::NotInTransaction`] instead of silently running
+/// outside a caller-owned transaction.
+///
+/// This helper does not open or commit a transaction. Lock-upgrade
+/// timing follows the caller's outer transaction mode.
+pub fn release_in_tx(
     conn: &Connection,
     name: &str,
     owner: &str,
     now_ms: i64,
 ) -> Result<ReleaseResult> {
+    ensure_in_tx(conn)?;
     match load_resource(conn, name)? {
         None => Ok(ReleaseResult::Rejected { current: None }),
         Some(row) => match row.current_lease(now_ms)? {
@@ -403,6 +436,14 @@ fn begin_immediate(conn: &Connection) -> rusqlite::Result<Transaction<'_>> {
     Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
 }
 
+fn ensure_in_tx(conn: &Connection) -> Result<()> {
+    if conn.is_autocommit() {
+        return Err(Error::NotInTransaction);
+    }
+
+    Ok(())
+}
+
 fn to_sql_err<E: std::fmt::Display>(err: E) -> rusqlite::Error {
     rusqlite::Error::UserFunctionError(Box::new(std::io::Error::other(err.to_string())))
 }
@@ -455,6 +496,7 @@ fn load_resource(conn: &Connection, name: &str) -> Result<Option<ResourceRow>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn open_db() -> Connection {
@@ -480,6 +522,27 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory sqlite");
         attach_bouncer_functions(&conn).expect("attach bouncer sql functions");
         conn
+    }
+
+    fn open_shared_sql_db() -> (TempDir, Connection, Connection) {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let db_path = tempdir.path().join("bouncer.sqlite3");
+
+        let conn_a = Connection::open(&db_path).expect("open first sql connection");
+        conn_a
+            .busy_timeout(Duration::from_millis(0))
+            .expect("set zero busy timeout on first sql connection");
+        attach_bouncer_functions(&conn_a).expect("attach functions to first sql connection");
+        bootstrap_bouncer_schema(&conn_a).expect("bootstrap schema on first sql connection");
+
+        let conn_b = Connection::open(&db_path).expect("open second sql connection");
+        conn_b
+            .busy_timeout(Duration::from_millis(0))
+            .expect("set zero busy timeout on second sql connection");
+        attach_bouncer_functions(&conn_b).expect("attach functions to second sql connection");
+        bootstrap_bouncer_schema(&conn_b).expect("bootstrap schema on second sql connection");
+
+        (tempdir, conn_a, conn_b)
     }
 
     fn create_business_table(conn: &Connection) {
@@ -711,6 +774,20 @@ mod tests {
     }
 
     #[test]
+    fn in_tx_helpers_reject_autocommit_connections() {
+        let conn = open_db();
+
+        let err = claim_in_tx(&conn, "scheduler", "worker-a", 100, 50).unwrap_err();
+        assert!(matches!(err, Error::NotInTransaction));
+
+        let err = renew_in_tx(&conn, "scheduler", "worker-a", 100, 50).unwrap_err();
+        assert!(matches!(err, Error::NotInTransaction));
+
+        let err = release_in_tx(&conn, "scheduler", "worker-a", 100).unwrap_err();
+        assert!(matches!(err, Error::NotInTransaction));
+    }
+
+    #[test]
     fn multiple_connections_share_live_lease_state() {
         let (_tempdir, conn_a, conn_b) = open_shared_db();
 
@@ -756,6 +833,45 @@ mod tests {
             Some(lease) => assert_live_lease(&lease, "scheduler", "worker-b", 2, 181),
             None => panic!("expected takeover to be visible from first connection"),
         }
+    }
+
+    #[test]
+    fn deferred_sql_transactions_surface_busy_under_writer_contention() {
+        let (_tempdir, conn_a, conn_b) = open_shared_sql_db();
+
+        conn_a
+            .execute_batch("BEGIN")
+            .expect("begin first deferred tx");
+        conn_b
+            .execute_batch("BEGIN")
+            .expect("begin second deferred tx");
+
+        let first_claim = conn_a
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("first in-tx claim should succeed");
+        assert_eq!(first_claim, Some(1));
+
+        let err = conn_b
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-b", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect_err("second deferred writer should hit SQLITE_BUSY");
+        let message = err.to_string();
+        assert!(
+            message.contains("database is locked") || message.contains("database is busy"),
+            "expected lock/busy failure, got: {message}"
+        );
+
+        conn_b
+            .execute_batch("ROLLBACK")
+            .expect("rollback second tx");
+        conn_a.execute_batch("ROLLBACK").expect("rollback first tx");
     }
 
     #[test]
