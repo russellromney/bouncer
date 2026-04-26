@@ -25,6 +25,18 @@ Bouncer is a single-machine lease and ownership primitive on top of Honker.
 - The wrapper stays pragma-neutral; callers own connection policy such as `journal_mode` and `busy_timeout`.
 - Wrapper tests prove negative bootstrap behavior and wrapper/core interoperability on the same database file.
 - Contention semantics are still primarily proven at the core layer; the wrapper phase proves thin delegation and interop rather than a new concurrency model.
+- a real `bouncer-extension` loadable-extension crate exists in the workspace.
+- `bouncer-honker` now also owns the first `bouncer_*` SQL function registration surface via `attach_bouncer_functions`.
+- The current SQL surface is:
+  - `bouncer_bootstrap()`
+  - `bouncer_claim(name, owner, ttl_ms, now_ms)`
+  - `bouncer_renew(name, owner, ttl_ms, now_ms)`
+  - `bouncer_release(name, owner, now_ms)`
+  - `bouncer_owner(name, now_ms)`
+  - `bouncer_token(name)`
+- SQL and Rust interoperate against the same database file and share the same lease semantics and fencing state.
+- The SQL surface keeps time explicit. It does not read `now()` from inside SQLite.
+- SQL mutators are autocommit-mode helpers. Calling `bouncer_claim`, `bouncer_renew`, or `bouncer_release` inside an already-open explicit SQL transaction fails with SQLite's nested-transaction error rather than silently changing the locking model.
 
 ## Current intent
 
@@ -42,4 +54,4 @@ Bouncer is a single-machine lease and ownership primitive on top of Honker.
 
 - This repo is not distributed consensus.
 - This repo is not a workflow engine.
-- This repo does not yet expose a polished language binding or a SQLite loadable-extension surface.
+- This repo does not yet expose non-Rust language bindings.

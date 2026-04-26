@@ -22,6 +22,9 @@ The repo now has a real Phase 001 Rust core:
 - Rust tests pin the current semantics
 - a first Rust wrapper crate now exists in `packages/bouncer`
 - the wrapper stays thin, keeps bootstrap explicit, and leaves time-ordering concerns out of scope
+- a first SQLite loadable-extension crate now exists in `bouncer-extension`
+- the first `bouncer_*` SQL surface reuses `bouncer-honker` semantics and keeps `now_ms` explicit
+- SQL/Rust interop is now proven on one database file
 
 The intended model is:
 
@@ -29,13 +32,15 @@ The intended model is:
   generic queue / wake / retry substrate
 - `bouncer-honker`
   Bouncer-specific schema and SQLite contract
+- `bouncer-extension`
+  shared SQLite-facing SQL boundary
 - `bouncer`
   thin language bindings
 
 ## Next build steps
 
-1. Re-evaluate whether a SQLite loadable-extension surface should arrive after the Rust binding, not before.
-2. Decide what the minimal SQL contract would actually be if it exists.
+1. Add docs/examples that show the SQL surface and the Rust wrapper against the same file.
+2. Decide whether the next public move is another binding or Honker scheduler adoption work.
 3. Explore how Honker scheduler ownership could eventually depend on Bouncer without introducing circular product boundaries.
 
 ## Future proposals

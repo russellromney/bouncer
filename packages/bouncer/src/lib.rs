@@ -118,6 +118,7 @@ fn duration_to_ttl_ms(ttl: Duration) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
     use tempfile::TempDir;
 
     fn open_wrapper_db() -> (TempDir, Bouncer) {
@@ -150,6 +151,83 @@ mod tests {
             .expect("system time after unix epoch")
             .as_millis();
         i64::try_from(millis).expect("time fits in i64 milliseconds")
+    }
+
+    fn attach_sql_functions(conn: &Connection) {
+        core::attach_bouncer_functions(conn).expect("attach bouncer sql functions");
+    }
+
+    fn open_sql_conn(tempdir: &TempDir) -> Connection {
+        let conn = Connection::open(tempdir.path().join("bouncer.sqlite3")).expect("open sql conn");
+        configure_test_connection(&conn);
+        attach_sql_functions(&conn);
+        conn
+    }
+
+    fn sql_missing_schema_error(err: &rusqlite::Error) -> bool {
+        match err {
+            rusqlite::Error::SqliteFailure(_, Some(message)) => {
+                message.contains("no such table") && message.contains("bouncer_resources")
+            }
+            _ => false,
+        }
+    }
+
+    fn sql_bootstrap(conn: &Connection) -> rusqlite::Result<i64> {
+        conn.query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+    }
+
+    fn sql_claim(
+        conn: &Connection,
+        name: &str,
+        owner: &str,
+        ttl_ms: i64,
+        now_ms: i64,
+    ) -> rusqlite::Result<Option<i64>> {
+        conn.query_row(
+            "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+            params![name, owner, ttl_ms, now_ms],
+            |row| row.get(0),
+        )
+    }
+
+    fn sql_renew(
+        conn: &Connection,
+        name: &str,
+        owner: &str,
+        ttl_ms: i64,
+        now_ms: i64,
+    ) -> rusqlite::Result<Option<i64>> {
+        conn.query_row(
+            "SELECT bouncer_renew(?1, ?2, ?3, ?4)",
+            params![name, owner, ttl_ms, now_ms],
+            |row| row.get(0),
+        )
+    }
+
+    fn sql_release(
+        conn: &Connection,
+        name: &str,
+        owner: &str,
+        now_ms: i64,
+    ) -> rusqlite::Result<i64> {
+        conn.query_row(
+            "SELECT bouncer_release(?1, ?2, ?3)",
+            params![name, owner, now_ms],
+            |row| row.get(0),
+        )
+    }
+
+    fn sql_owner(conn: &Connection, name: &str, now_ms: i64) -> rusqlite::Result<Option<String>> {
+        conn.query_row(
+            "SELECT bouncer_owner(?1, ?2)",
+            params![name, now_ms],
+            |row| row.get(0),
+        )
+    }
+
+    fn sql_token(conn: &Connection, name: &str) -> rusqlite::Result<Option<i64>> {
+        conn.query_row("SELECT bouncer_token(?1)", params![name], |row| row.get(0))
     }
 
     #[test]
@@ -186,6 +264,32 @@ mod tests {
             .expect("claim after bootstrap");
 
         assert!(matches!(acquired, ClaimResult::Acquired(_)));
+    }
+
+    #[test]
+    fn sql_functions_require_explicit_bootstrap() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let sql_conn = open_sql_conn(&tempdir);
+
+        let err = sql_claim(&sql_conn, "scheduler", "worker-a", 1_000, 100)
+            .expect_err("claim before bootstrap should fail");
+
+        assert!(sql_missing_schema_error(&err));
+    }
+
+    #[test]
+    fn sql_bootstrap_is_explicit_and_idempotent() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let sql_conn = open_sql_conn(&tempdir);
+
+        assert_eq!(sql_bootstrap(&sql_conn).expect("first bootstrap"), 1);
+        assert_eq!(sql_bootstrap(&sql_conn).expect("second bootstrap"), 1);
+
+        assert_eq!(
+            sql_claim(&sql_conn, "scheduler", "worker-a", 5_000, 100)
+                .expect("claim after bootstrap"),
+            Some(1)
+        );
     }
 
     #[test]
@@ -259,6 +363,128 @@ mod tests {
         let inspected = core::inspect(&core_conn, "scheduler", lease.lease_expires_at_ms - 1)
             .expect("core inspect");
         assert_eq!(inspected, Some(lease));
+    }
+
+    #[test]
+    fn sql_claim_is_visible_to_wrapper_on_separate_connection() {
+        let (tempdir, wrapper) = open_wrapper_db();
+        configure_test_connection(&wrapper.conn);
+        wrapper.bootstrap().expect("wrapper bootstrap");
+
+        let sql_conn = open_sql_conn(&tempdir);
+        assert_eq!(sql_bootstrap(&sql_conn).expect("sql bootstrap"), 1);
+        let now_ms = system_now_for_core();
+
+        assert_eq!(
+            sql_claim(&sql_conn, "scheduler", "worker-a", 5_000, now_ms).expect("sql claim"),
+            Some(1)
+        );
+
+        let inspected = wrapper.inspect("scheduler").expect("wrapper inspect");
+        let inspected = inspected.expect("live lease");
+        assert_eq!(inspected.owner, "worker-a");
+        assert_eq!(inspected.token, 1);
+    }
+
+    #[test]
+    fn wrapper_claim_is_visible_to_sql_on_separate_connection() {
+        let (tempdir, wrapper) = open_wrapper_db();
+        configure_test_connection(&wrapper.conn);
+        wrapper.bootstrap().expect("wrapper bootstrap");
+
+        let sql_conn = open_sql_conn(&tempdir);
+        assert_eq!(sql_bootstrap(&sql_conn).expect("sql bootstrap"), 1);
+
+        let lease = match wrapper
+            .claim("scheduler", "worker-a", Duration::from_secs(30))
+            .expect("wrapper claim")
+        {
+            ClaimResult::Acquired(lease) => lease,
+            ClaimResult::Busy(current) => panic!("unexpected busy lease: {current:?}"),
+        };
+
+        assert_eq!(
+            sql_owner(&sql_conn, "scheduler", lease.lease_expires_at_ms - 1).expect("sql owner"),
+            Some("worker-a".to_owned())
+        );
+        assert_eq!(
+            sql_token(&sql_conn, "scheduler").expect("sql token"),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn sql_and_rust_preserve_monotonic_fencing_tokens() {
+        let (tempdir, wrapper) = open_wrapper_db();
+        configure_test_connection(&wrapper.conn);
+        wrapper.bootstrap().expect("wrapper bootstrap");
+
+        let sql_conn = open_sql_conn(&tempdir);
+        assert_eq!(sql_bootstrap(&sql_conn).expect("sql bootstrap"), 1);
+        let now_ms = system_now_for_core();
+
+        assert_eq!(
+            sql_claim(&sql_conn, "scheduler", "worker-a", 5_000, now_ms).expect("sql claim"),
+            Some(1)
+        );
+        assert_eq!(
+            wrapper
+                .release("scheduler", "worker-a")
+                .expect("wrapper release"),
+            ReleaseResult::Released {
+                name: "scheduler".to_owned(),
+                token: 1,
+            }
+        );
+        assert_eq!(
+            sql_claim(&sql_conn, "scheduler", "worker-b", 5_000, now_ms + 200)
+                .expect("sql reclaim"),
+            Some(2)
+        );
+        assert_eq!(
+            sql_token(&sql_conn, "scheduler").expect("sql token"),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn sql_full_lease_cycle_matches_expected_return_shapes() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let sql_conn = open_sql_conn(&tempdir);
+        assert_eq!(sql_bootstrap(&sql_conn).expect("sql bootstrap"), 1);
+
+        assert_eq!(
+            sql_claim(&sql_conn, "scheduler", "worker-a", 5_000, 100).expect("sql claim"),
+            Some(1)
+        );
+        assert_eq!(
+            sql_claim(&sql_conn, "scheduler", "worker-b", 5_000, 200).expect("busy sql claim"),
+            None
+        );
+        assert_eq!(
+            sql_renew(&sql_conn, "scheduler", "worker-a", 7_000, 300).expect("sql renew"),
+            Some(1)
+        );
+        assert_eq!(
+            sql_owner(&sql_conn, "scheduler", 301).expect("sql owner"),
+            Some("worker-a".to_owned())
+        );
+        assert_eq!(
+            sql_token(&sql_conn, "scheduler").expect("sql token"),
+            Some(1)
+        );
+        assert_eq!(
+            sql_release(&sql_conn, "scheduler", "worker-a", 400).expect("sql release"),
+            1
+        );
+        assert_eq!(
+            sql_owner(&sql_conn, "scheduler", 401).expect("sql owner after release"),
+            None
+        );
+        assert_eq!(
+            sql_token(&sql_conn, "scheduler").expect("sql token after release"),
+            Some(1)
+        );
     }
 
     #[test]

@@ -2,98 +2,126 @@
 
 ## Goal
 
-Decide whether Bouncer should add a SQLite SQL/loadable-extension
-surface now that the first Rust wrapper exists.
+Implement the first SQLite SQL/loadable-extension surface for Bouncer.
 
 ## Phase outcome
 
 At the end of Phase 003, Bouncer should have:
 
-- a committed answer on whether the SQL surface is the next right move
-- a narrower product story around that answer
-- either:
-  - a follow-on implementation plan for the minimal SQL surface, or
-  - an explicit defer/reject decision with the next better phase named
+- a real SQLite loadable-extension crate in the workspace
+- a minimal SQL surface that reuses the proven `bouncer-honker` core
+- file-backed proof that SQL and Rust interoperate on the same database
+  file
+- docs that explain what the SQL surface is for and where it stops
 
 At the end of Phase 003, Bouncer should not have:
 
-- a half-implemented SQL surface
 - a widened lease contract
+- hidden time reads inside SQLite
+- a second implementation of lease semantics
 - any hidden pressure for Honker to absorb Bouncer again
 
 ## Mapping from spec diff to implementation
 
-The spec diff says Phase 003 is a decision phase, not an implementation
-phase.
+The spec diff says the product decision is already made: Bouncer should
+ship a first SQL surface next.
 
-So the implementation plan should produce exactly three things:
+So the implementation plan should produce three things:
 
-1. a reviewable argument for or against the SQL surface
-2. a concrete yes/no decision in `reviews_and_decisions.md`
-3. if yes, a small next-phase contract; if no, a clear next build step
+1. a new loadable-extension crate that registers the first `bouncer_*`
+   SQL helpers
+2. interop tests proving those helpers share semantics and state with
+   the existing Rust surfaces
+3. doc updates that describe the SQL surface honestly as the next public
+   boundary, not a speculative maybe
 
-## Questions this phase must answer
+## Phase decisions already made
 
-- Does a SQL surface strengthen the single-machine SQLite story, or does
-  it just duplicate the Rust wrapper too early?
-- Is the SQL surface mainly for extension users, or mainly for future
-  cross-language bindings?
-- If SQL exists, what is the smallest honest surface?
-- If SQL does not exist yet, what should Bouncer build next instead?
+- SQL is the next right move.
+- The SQL surface is for both direct SQLite callers and future thin
+  bindings in other languages.
+- Time stays explicit in SQL. There is no implicit `now()` helper in
+  Phase 003.
+- The SQL surface stays small and claim-centric. It does not try to
+  expose every possible inspection helper at once.
 
-## Candidate SQL surface
+## Target SQL surface
 
-If the answer trends yes, the likely minimum surface is:
+The minimum Phase 003 surface is:
 
-- `bouncer_claim(name, owner, ttl_ms, now_ms?)`
-- `bouncer_renew(name, owner, ttl_ms, now_ms?)`
-- `bouncer_release(name, owner, now_ms?)`
-- `bouncer_owner(name, now_ms?)`
+- `bouncer_bootstrap()`
+- `bouncer_claim(name, owner, ttl_ms, now_ms)`
+- `bouncer_renew(name, owner, ttl_ms, now_ms)`
+- `bouncer_release(name, owner, now_ms)`
+- `bouncer_owner(name, now_ms)`
 - `bouncer_token(name)`
 
-This is only a candidate set for evaluation, not a commitment.
+Expected return shape:
+
+- `bouncer_bootstrap()` returns success or SQL error.
+- `bouncer_claim(...)` returns the fencing token on success, `NULL` when
+  the resource is currently held by another live owner, and SQL error on
+  invalid arguments.
+- `bouncer_renew(...)` returns the current fencing token on success,
+  `NULL` when there is no matching live lease, and SQL error on invalid
+  arguments.
+- `bouncer_release(...)` returns `1` on success and `0` when there is no
+  matching live lease.
+- `bouncer_owner(...)` returns the current live owner or `NULL`.
+- `bouncer_token(...)` returns the current fencing token for the
+  resource, or `NULL` if the resource has never been claimed.
 
 ## Build order
 
-### 1. Read the current baseline
+### 1. Add the extension crate shape
 
-- use Phase 001 and Phase 002 artifacts
-- use `SYSTEM.md`, `README.md`, and `ROADMAP.md`
+- add a new workspace member for the SQLite loadable extension
+- mirror Honker's "core + extension + thin bindings" shape instead of
+  inventing a third architecture
 
-### 2. Evaluate product shape
+### 2. Register the minimal SQL helpers
 
-- ask whether SQL is actually the next best public surface
-- ask whether SQL exposure would clarify or muddy the Bouncer story
+- implement `bouncer_bootstrap`, `claim`, `renew`, `release`, `owner`,
+  and `token`
+- delegate every state transition to `bouncer-honker`
+- keep `now_ms` explicit in the SQL signatures
 
-### 3. Evaluate technical shape
+### 3. Prove SQL/Rust interop on one database file
 
-- if SQL exists, decide whether explicit-time variants are acceptable or
-  whether time handling becomes too awkward
-- ask what test matrix would be required to keep SQL semantics aligned
-  with the core
+- load the extension into SQLite
+- prove bootstrap is explicit and idempotent
+- prove SQL writes are visible to the Rust core and Rust writes are
+  visible to SQL helpers
+- prove fencing monotonicity survives mixed SQL/Rust usage
 
-### 4. Record the decision
+### 4. Update docs and baseline honestly
 
-- write a proper plan review
-- write a decision round that either opens a SQL implementation phase or
-  defers SQL clearly
+- update README / ROADMAP / package docs to describe the new SQL surface
+- update `SYSTEM.md` only after tests prove the extension belongs in the
+  baseline
 
 ## Files likely to change
 
+- `Cargo.toml`
+- `bouncer-extension/*`
 - `.intent/phases/003-sql-surface-decision/*`
+- `README.md`
 - `ROADMAP.md`
+- `SYSTEM.md`
 
 ## Areas that should not be touched
 
 - `bouncer-honker` lease semantics
-- `packages/bouncer` wrapper behavior
+- `packages/bouncer` wrapper behavior except where interop tests need a
+  little shared harness code
 - Honker integration
 
 ## Risks and assumptions
 
-- SQL may sound more "SQLite-native" while still being the wrong next
-  surface
-- time handling often gets uglier in SQL than in Rust, especially if the
-  project still wants deterministic simulation later
-- a second public surface is only worth it if it truly broadens the
-  product, not if it just repeats the Rust wrapper in a clumsier form
+- loadable-extension packaging is more work than the Rust wrapper, so
+  the surface must stay small
+- scalar SQL functions have awkward return-shape limits; the Phase 003
+  contract should prefer boring scalar results over clever JSON
+- explicit `now_ms` will look a little uglier in SQL, but that is still
+  better than hiding time inside SQLite and breaking the deterministic
+  simulation direction

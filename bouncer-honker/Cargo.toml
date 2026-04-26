@@ -6,7 +6,7 @@ description = "Rust core for Bouncer, a lease and coordination library on top of
 license = "MIT"
 
 [dependencies]
-rusqlite = "0.39.0"
+rusqlite = { version = "0.39.0", features = ["functions"] }
 thiserror = "2.0.17"
 
 [dev-dependencies]

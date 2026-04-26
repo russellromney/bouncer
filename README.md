@@ -28,9 +28,11 @@ ownership and other single-machine coordination.
 - repo-level docs for current intent and future direction
 - a real Phase 001 `bouncer-honker` core crate
 - a first Rust wrapper crate in `packages/bouncer`
+- a first SQLite loadable-extension crate in `bouncer-extension`
 - a SQLite schema bootstrap plus Rust `claim` / `renew` / `release` / `inspect`
 - Rust tests that pin the initial lease semantics
 - wrapper tests for explicit bootstrap and wrapper/core interoperability
+- SQL function registration in the core plus SQL/Rust interop tests on one file
 - wrapper convenience methods that stay thin and keep explicit-time control in the core
 
 ## V1 shape
@@ -41,15 +43,20 @@ ownership and other single-machine coordination.
 - fencing tokens
 - inspect current owner
 
-## Target SQL surface
+## Current SQL surface
 
-These are still target APIs, not implemented SQL helpers yet. Phase 001 currently exposes Rust helpers only.
+The first SQLite-facing surface now exists via `bouncer-extension`:
 
-- `bouncer_claim(name, owner, ttl_ms)`
-- `bouncer_renew(name, owner, ttl_ms)`
-- `bouncer_release(name, owner)`
-- `bouncer_owner(name)`
+- `bouncer_bootstrap()`
+- `bouncer_claim(name, owner, ttl_ms, now_ms)`
+- `bouncer_renew(name, owner, ttl_ms, now_ms)`
+- `bouncer_release(name, owner, now_ms)`
+- `bouncer_owner(name, now_ms)`
 - `bouncer_token(name)`
+
+The SQL surface stays explicit about time. Higher-level bindings can
+offer convenience clocks later, but the SQLite-facing contract should
+not hide `now_ms` inside the extension.
 
 ## Non-goals
 
@@ -89,5 +96,7 @@ small internal primitive rather than grow into a bigger product.
 
 - `bouncer-honker`
   Rust core that owns schema and SQLite operations
+- `bouncer-extension`
+  SQLite loadable extension / shared SQL surface
 - `packages/bouncer`
   thin binding surface

@@ -1,0 +1,17 @@
+[package]
+name = "bouncer-extension"
+version = "0.1.0"
+edition = "2021"
+description = "SQLite loadable extension for Bouncer. Adds bouncer_* lease functions to any SQLite client."
+license = "MIT"
+readme = "README.md"
+keywords = ["sqlite", "lease", "lock", "coordination", "bouncer"]
+categories = ["database", "concurrency"]
+
+[lib]
+name = "bouncer_ext"
+crate-type = ["cdylib"]
+
+[dependencies]
+bouncer-honker = { path = "../bouncer-honker", version = "0.1.0" }
+rusqlite = { version = "0.39.0", features = ["loadable_extension"] }

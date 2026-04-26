@@ -1,3 +1,4 @@
+use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 pub const BOUNCER_SCHEMA_VERSION: &str = "1";
@@ -111,6 +112,16 @@ pub fn inspect(conn: &Connection, name: &str, now_ms: i64) -> Result<Option<Leas
         .map(|row| row.current_lease(now_ms))
         .transpose()
         .map(Option::flatten)
+}
+
+/// Return the current live owner for `name` at `now_ms`, if one exists.
+pub fn owner(conn: &Connection, name: &str, now_ms: i64) -> Result<Option<String>> {
+    Ok(inspect(conn, name, now_ms)?.map(|lease| lease.owner))
+}
+
+/// Return the current fencing token for `name`, even if no live lease exists.
+pub fn token(conn: &Connection, name: &str) -> Result<Option<i64>> {
+    Ok(load_resource(conn, name)?.map(|row| row.token))
 }
 
 /// Attempt to claim a named resource for `owner`.
@@ -249,8 +260,83 @@ pub fn release(conn: &Connection, name: &str, owner: &str, now_ms: i64) -> Resul
     Ok(result)
 }
 
+/// Register all `bouncer_*` scalar functions on `conn`.
+///
+/// Mutating SQL helpers (`claim`, `renew`, `release`) are autocommit-mode
+/// helpers. They delegate to the same core functions as Rust callers, and
+/// those core functions open `BEGIN IMMEDIATE` transactions internally.
+///
+/// That means `SELECT bouncer_claim(...)` works in normal autocommit mode, but
+/// calling it from inside an already-open explicit SQL transaction will fail
+/// with SQLite's nested-transaction error rather than silently weakening the
+/// locking model.
+pub fn attach_bouncer_functions(conn: &Connection) -> rusqlite::Result<()> {
+    conn.create_scalar_function("bouncer_bootstrap", 0, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let db = unsafe { ctx.get_connection() }?;
+        bootstrap_bouncer_schema(&db).map_err(to_sql_err)?;
+        Ok(1i64)
+    })?;
+
+    conn.create_scalar_function("bouncer_claim", 4, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let name: String = ctx.get(0)?;
+        let owner: String = ctx.get(1)?;
+        let ttl_ms: i64 = ctx.get(2)?;
+        let now_ms: i64 = ctx.get(3)?;
+        let db = unsafe { ctx.get_connection() }?;
+
+        match claim(&db, &name, &owner, now_ms, ttl_ms).map_err(to_sql_err)? {
+            ClaimResult::Acquired(lease) => Ok(Some(lease.token)),
+            ClaimResult::Busy(_) => Ok(None),
+        }
+    })?;
+
+    conn.create_scalar_function("bouncer_renew", 4, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let name: String = ctx.get(0)?;
+        let owner: String = ctx.get(1)?;
+        let ttl_ms: i64 = ctx.get(2)?;
+        let now_ms: i64 = ctx.get(3)?;
+        let db = unsafe { ctx.get_connection() }?;
+
+        match renew(&db, &name, &owner, now_ms, ttl_ms).map_err(to_sql_err)? {
+            RenewResult::Renewed(lease) => Ok(Some(lease.token)),
+            RenewResult::Rejected { .. } => Ok(None),
+        }
+    })?;
+
+    conn.create_scalar_function("bouncer_release", 3, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let name: String = ctx.get(0)?;
+        let owner: String = ctx.get(1)?;
+        let now_ms: i64 = ctx.get(2)?;
+        let db = unsafe { ctx.get_connection() }?;
+
+        match release(&db, &name, &owner, now_ms).map_err(to_sql_err)? {
+            ReleaseResult::Released { .. } => Ok(1i64),
+            ReleaseResult::Rejected { .. } => Ok(0i64),
+        }
+    })?;
+
+    conn.create_scalar_function("bouncer_owner", 2, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let name: String = ctx.get(0)?;
+        let now_ms: i64 = ctx.get(1)?;
+        let db = unsafe { ctx.get_connection() }?;
+        owner(&db, &name, now_ms).map_err(to_sql_err)
+    })?;
+
+    conn.create_scalar_function("bouncer_token", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let name: String = ctx.get(0)?;
+        let db = unsafe { ctx.get_connection() }?;
+        token(&db, &name).map_err(to_sql_err)
+    })?;
+
+    Ok(())
+}
+
 fn begin_immediate(conn: &Connection) -> rusqlite::Result<Transaction<'_>> {
     Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+}
+
+fn to_sql_err<E: std::fmt::Display>(err: E) -> rusqlite::Error {
+    rusqlite::Error::UserFunctionError(Box::new(std::io::Error::other(err.to_string())))
 }
 
 fn checked_expiry(now_ms: i64, ttl_ms: i64) -> Result<i64> {
@@ -322,6 +408,12 @@ mod tests {
         (tempdir, conn_a, conn_b)
     }
 
+    fn open_sql_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        attach_bouncer_functions(&conn).expect("attach bouncer sql functions");
+        conn
+    }
+
     fn assert_live_lease(
         lease: &LeaseInfo,
         name: &str,
@@ -364,6 +456,8 @@ mod tests {
         let conn = open_db();
 
         assert_eq!(inspect(&conn, "scheduler", 100).unwrap(), None);
+        assert_eq!(owner(&conn, "scheduler", 100).unwrap(), None);
+        assert_eq!(token(&conn, "scheduler").unwrap(), None);
     }
 
     #[test]
@@ -443,6 +537,8 @@ mod tests {
             }
             other => panic!("expected acquired result, got {other:?}"),
         }
+
+        assert_eq!(token(&conn, "scheduler").unwrap(), Some(2));
     }
 
     #[test]
@@ -577,6 +673,103 @@ mod tests {
             Some(lease) => assert_live_lease(&lease, "scheduler", "worker-b", 2, 181),
             None => panic!("expected takeover to be visible from first connection"),
         }
+    }
+
+    #[test]
+    fn attached_sql_functions_cover_bootstrap_and_full_lease_cycle() {
+        let conn = open_sql_db();
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        let first_claim: Option<i64> = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(first_claim, Some(1));
+
+        let owner_after_claim: Option<String> = conn
+            .query_row(
+                "SELECT bouncer_owner(?1, ?2)",
+                params!["scheduler", 120_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner_after_claim.as_deref(), Some("worker-a"));
+
+        let token_after_claim: Option<i64> = conn
+            .query_row("SELECT bouncer_token(?1)", params!["scheduler"], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(token_after_claim, Some(1));
+
+        let renewed: Option<i64> = conn
+            .query_row(
+                "SELECT bouncer_renew(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 60_i64, 120_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(renewed, Some(1));
+
+        let released: i64 = conn
+            .query_row(
+                "SELECT bouncer_release(?1, ?2, ?3)",
+                params!["scheduler", "worker-a", 140_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(released, 1);
+
+        let owner_after_release: Option<String> = conn
+            .query_row(
+                "SELECT bouncer_owner(?1, ?2)",
+                params!["scheduler", 141_i64],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owner_after_release, None);
+
+        let token_after_release: Option<i64> = conn
+            .query_row("SELECT bouncer_token(?1)", params!["scheduler"], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(token_after_release, Some(1));
+    }
+
+    #[test]
+    fn mutating_sql_helpers_fail_inside_explicit_transaction() {
+        let conn = open_sql_db();
+
+        let bootstrapped: i64 = conn
+            .query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(bootstrapped, 1);
+
+        conn.execute_batch("BEGIN").unwrap();
+
+        let err = conn
+            .query_row(
+                "SELECT bouncer_claim(?1, ?2, ?3, ?4)",
+                params!["scheduler", "worker-a", 50_i64, 100_i64],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect_err("claim inside explicit transaction should fail");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("cannot start a transaction within a transaction"),
+            "unexpected nested-transaction error: {message}"
+        );
+
+        conn.execute_batch("ROLLBACK").unwrap();
     }
 
     fn release_after_claim(conn: &Connection) {
