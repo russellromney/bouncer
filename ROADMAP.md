@@ -34,10 +34,9 @@ The intended model is:
 
 ## Next build steps
 
-1. Add one tiny binding that delegates directly to the Rust core contract.
-2. Decide whether the first public binding should expose explicit `now_ms` or hide it behind friendlier helpers.
-3. Re-evaluate whether a SQLite loadable-extension surface should arrive after the binding, not before.
-4. Explore how Honker scheduler ownership could eventually depend on Bouncer without introducing circular product boundaries.
+1. Re-evaluate whether a SQLite loadable-extension surface should arrive after the Rust binding, not before.
+2. Decide what the minimal SQL contract would actually be if it exists.
+3. Explore how Honker scheduler ownership could eventually depend on Bouncer without introducing circular product boundaries.
 
 ## Future proposals
 

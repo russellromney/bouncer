@@ -1,3 +1,21 @@
 # Commits
 
-No git commit has been created for this phase yet.
+## Phase 002 landing commit
+
+- `9917973` `Add first Rust wrapper for Bouncer`
+
+Current local work:
+
+- added `packages/bouncer` as a workspace crate
+- implemented owned `Bouncer` and borrowed `BouncerRef<'a>` wrappers
+- kept bootstrap explicit via `bootstrap()`
+- delegated wrapper lease operations directly to `bouncer-honker`
+- added wrapper tests for negative bootstrap behavior, wrapper/core
+  interop, TTL parity, and fencing-token monotonicity across
+  wrapper/core calls
+
+Current evidence:
+
+- `cargo test` passes in the repo root
+- 8 wrapper tests pass in `packages/bouncer`
+- 16 core tests still pass in `bouncer-honker`
