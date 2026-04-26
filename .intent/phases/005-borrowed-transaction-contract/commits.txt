@@ -1,3 +1,30 @@
 # Commits
 
-No git commit has been created for this phase yet.
+- `9e00bae` `Fix Bouncer borrowed transaction contract`
+
+Local work recorded before commit:
+
+- promoted `claim_in_tx`, `renew_in_tx`, and `release_in_tx` into the
+  public `bouncer-honker` Rust surface
+- added `Error::NotInTransaction` plus a fail-fast guard for public
+  in-transaction helpers used on autocommit connections
+- documented the dual-surface contract directly in `bouncer-honker`
+  crate docs and on each public `*_in_tx` helper
+- changed `BouncerRef::claim`, `renew`, and `release` to branch on
+  `is_autocommit()` and reuse caller-owned transactions/savepoints
+  instead of tripping nested-transaction failures
+- added borrowed-path tests for explicit-transaction commit/rollback,
+  multi-mutator commit/rollback, semantic-stress behavior, and
+  savepoint participation
+- recorded the `as_ref` -> `borrowed` wrapper rename
+- merged the landed Phase 005 behavior into `SYSTEM.md`,
+  `CHANGELOG.md`, and `ROADMAP.md`
+- updated extension and wrapper docs so the safe default transactional
+  SQL example uses `BEGIN IMMEDIATE`
+
+Evidence reviewed locally:
+
+- `cargo fmt --all`
+  passed cleanly
+- `cargo test`
+  20 wrapper tests passed and 26 core tests passed
