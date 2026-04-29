@@ -77,40 +77,30 @@ more bindings. Python is useful as an example binding and cross-surface
 proof, but the primary correctness surfaces are `bouncer-core`,
 `bouncer-extension`, and the Rust wrapper.
 
-1. **Phase 011 — invariant/property hardening.**
+1. **Phase 011 — deterministic invariant runner.**
    Add a deterministic core-level operation runner over claim, renew,
    release, inspect, owner, and token. Generate many explicit-time
    operation sequences across resources and owners. Assert invariants:
    no two live owners for one resource, fencing tokens never decrease,
    release never resets token state, wrong owners cannot renew/release,
    expiry makes takeover possible, and rejected operations do not mutate
-   state.
-2. **Phase 012 — SQLite contention and transaction matrix.**
+   state. This is the first small DST-shaped harness: seeded operations,
+   injected time, replayable failures, and property assertions, without
+   yet adding fault injection, VFS shims, or a shared family simulator.
+2. **Phase 012 — SQLite behavior matrix.**
    Exhaustively pin the lease behavior under `BEGIN`, `BEGIN IMMEDIATE`,
    savepoints, autocommit, two connections, zero `busy_timeout`, nonzero
-   `busy_timeout`, and lock contention. The goal is to clearly separate
-   "lease busy" from "SQLite writer lock busy" across core, SQL
-   extension, and Rust wrapper surfaces.
+   `busy_timeout`, lock contention, and practical SQLite settings such
+   as `journal_mode` (`WAL`, `DELETE`), `synchronous`, `locking_mode`,
+   and extension loading. The goal is to clearly separate "lease busy"
+   from "SQLite writer lock busy" and prove Bouncer does not accidentally
+   depend on one happy-path SQLite setup.
 3. **Phase 013 — schema and data-integrity hardening.**
    Decide and test behavior for invalid/manual rows, schema drift, old
    schema versions, token near-overflow, bad `ttl_ms`, huge timestamps,
    unusual names/owners, and partial application edits. Make impossible
    rows either impossible by constraint or loud by error.
-4. **Phase 014 — SQLite settings matrix.**
-   Test the primitive across practical SQLite configurations:
-   `journal_mode` (`WAL`, `DELETE`), `synchronous`, `locking_mode`,
-   `busy_timeout`, cache/shared-cache posture where relevant, and
-   extension loading. This is not about supporting every pragma under
-   the sun; it is about proving Bouncer does not accidentally depend on
-   one happy-path SQLite setup.
-5. **Phase 015 — minimal deterministic simulation harness.**
-   Extract the Phase 011 runner into a reusable test helper shape that
-   other Honker-family crates can copy or import: seeded operations,
-   injected time, explicit connection identities, replayable failures,
-   and property assertions. Keep it small enough that it can land
-   inside this repo first rather than waiting for a grand shared
-   simulator.
-6. **Phase 016 — docs as safety rails.**
+4. **Phase 014 — docs as safety rails.**
    Add troubleshooting and safety docs for the cases users will hit:
    lease busy vs SQLite busy vs timeout, `BEGIN IMMEDIATE` guidance,
    fencing-token obligations, pragma policy, and which surface to use
