@@ -26,6 +26,11 @@ with db.transaction() as tx:
         tx.rollback()
 ```
 
+The supported V1 transaction shape is the `with` block. Direct
+`tx = db.transaction(); ...; tx.commit()` usage may work today, but it
+is not the documented contract; use the context manager so rollback on
+exceptions is deterministic.
+
 While a transaction is active, use the `tx` object for all lease work.
 Top-level `db.claim`, `db.renew`, `db.release`, and `db.inspect` calls
 raise `BouncerError` until the transaction finishes.

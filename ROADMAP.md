@@ -66,7 +66,12 @@ The intended model is:
    docs, packaging shape, and whether caller-owned Python
    `sqlite3.Connection` users should be served through extension docs
    rather than a new binding surface.
-2. Start the Honker integration phase once Bouncer's Python baseline has
+2. Clean up two post-Phase-009 implementation notes when the next
+   Python-binding phase touches this area: decide whether to remove the
+   redundant Python `Transaction.__del__` safety net, and align the
+   `bouncer-py` Rust edition with the rest of the family if that is the
+   intended standard.
+3. Start the Honker integration phase once Bouncer's Python baseline has
    survived review: Honker scheduler/coordination leases should depend
    on Bouncer rather than carrying a parallel lease primitive.
 

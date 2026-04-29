@@ -74,6 +74,9 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
 - The Python binding exposes a `with db.transaction() as tx:` context
   manager for business writes plus lease mutations in one
   `BEGIN IMMEDIATE` boundary.
+- The supported Python V1 transaction shape is the `with` block; direct
+  non-context-manager transaction use is not part of the documented
+  contract.
 - While a Python transaction is active, top-level lease operations on
   that handle fail loudly; callers use the transaction handle until it
   commits or rolls back.

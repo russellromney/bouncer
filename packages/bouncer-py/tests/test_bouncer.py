@@ -145,6 +145,49 @@ def test_transaction_commit_persists_business_write_and_lease(tmp_path: Path) ->
     assert db.inspect("scheduler") is not None
 
 
+def test_transaction_inspect_returns_live_lease(tmp_path: Path) -> None:
+    db = bouncer.open(tmp_path / "app.sqlite3")
+    db.bootstrap()
+
+    with db.transaction() as tx:
+        claim = tx.claim("scheduler", "worker-a", ttl_ms=30_000)
+        inspected = tx.inspect("scheduler")
+
+    assert claim.lease is not None
+    assert inspected == claim.lease
+
+
+def test_transaction_renew_extends_lease(tmp_path: Path) -> None:
+    db = bouncer.open(tmp_path / "app.sqlite3")
+    db.bootstrap()
+
+    with db.transaction() as tx:
+        claim = tx.claim("scheduler", "worker-a", ttl_ms=30_000)
+        renewed = tx.renew("scheduler", "worker-a", ttl_ms=60_000)
+
+    assert claim.lease is not None
+    assert renewed.renewed
+    assert renewed.lease is not None
+    assert renewed.lease.token == claim.lease.token
+    assert renewed.lease.lease_expires_at_ms >= claim.lease.lease_expires_at_ms
+
+
+def test_transaction_release_clears_owner(tmp_path: Path) -> None:
+    db = bouncer.open(tmp_path / "app.sqlite3")
+    db.bootstrap()
+
+    with db.transaction() as tx:
+        claim = tx.claim("scheduler", "worker-a", ttl_ms=30_000)
+        released = tx.release("scheduler", "worker-a")
+        inspected = tx.inspect("scheduler")
+
+    assert claim.lease is not None
+    assert released.released
+    assert released.token == claim.lease.token
+    assert inspected is None
+    assert db.inspect("scheduler") is None
+
+
 def test_transaction_rollback_discards_business_write_and_lease(tmp_path: Path) -> None:
     path = tmp_path / "app.sqlite3"
     create_business_table(path)

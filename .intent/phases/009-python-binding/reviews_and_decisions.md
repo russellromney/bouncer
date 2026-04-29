@@ -545,3 +545,232 @@ proceed.
 Phase 009 implementation is ready once `spec-diff.md` and
 `plan.md` are patched to reflect `[D16]` through `[D22]`. After
 those pins land, code can proceed without further plan rounds.
+
+## Review Round 003
+
+### Reviewing
+
+- the landed implementation in commit `de83aae Add Bouncer Python
+  binding` and trace `127ebff Record Phase 009 commit trace`
+- `packages/bouncer-py/src/lib.rs` (302 lines), the Python sources
+  `_bouncer.py` (138 lines) and `models.py` (70 lines), and the
+  test suite `tests/test_bouncer.py` (235 lines, 11 tests)
+- `Makefile`, root `pyproject.toml`, `.gitignore`,
+  `packages/bouncer-py/Cargo.toml`, and `packages/bouncer-py/pyproject.toml`
+- `make test` (61 Rust + 11 Python tests passing) and
+  `cargo clippy --manifest-path packages/bouncer-py/Cargo.toml --all-targets`
+  (clean)
+
+### Decision-vs-delivery scorecard
+
+All fifteen contract pins from Decision Rounds 002 and 004 are
+delivered and traceable to specific code:
+
+- [D6] core-direct binding: `use bouncer_core as core` plus
+  `core::claim` / `core::claim_in_tx` etc. throughout
+  `packages/bouncer-py/src/lib.rs`
+- [D7] cross-surface verification: `connect_sql()` in
+  `tests/test_bouncer.py` loads `bouncer_ext` via stdlib `sqlite3`
+  and exercises `bouncer_owner` / `bouncer_token`
+- [D8] own `[workspace]`: empty `[workspace]` block in
+  `packages/bouncer-py/Cargo.toml`; `cargo` from the root cannot
+  see `bouncer-py`, which is the intended isolation
+- [D9] umbrella `BouncerError`: `_call(...)` in `_bouncer.py` wraps
+  every native call and re-raises as `BouncerError`
+- [D10] `tx.execute` returns affected count: `execute_in_transaction`
+  returns `usize` from `rusqlite::Statement::execute`
+- [D11] positional binding contract: `params_from_iter(values)` plus
+  `py_to_value` in `lib.rs`; `test_transaction_execute_binds_positional_parameters`
+  pins it with a `'); DROP TABLE` payload
+- [D12] no PyPI: `publish = false` on the cargo crate
+- [D13] pinned `make` targets: `test-rust`, `build-ext`, `build-py`,
+  `test-python`, `test` all present
+- [D16] context-manager state machine: `Transaction._finished` plus
+  `__exit__` no-op behavior; pinned by
+  `test_context_manager_explicit_finish_is_terminal_and_exit_is_noop`
+- [D17] top-level ops raise during active tx:
+  `ensure_no_active_transaction()` on every `db.*` native method;
+  pinned by `test_top_level_operations_raise_during_active_transaction`
+- [D18] `pyclass(unsendable)`: line 135 of `lib.rs`
+- [D19] flat-shape `@dataclass`: `models.py` uses
+  `frozen=True, slots=True`; native returns plain `Py<PyDict>`
+- [D20] `uv` hard dep: `Makefile` uses `uv run --group dev`
+- [D21] artifact path: tests resolve
+  `target/debug/libbouncer_ext.{dylib,so}` / `bouncer_ext.dll`
+  with a clear failure message
+- [D22] tests under package directory: `packages/bouncer-py/tests/`
+
+### What is good
+
+- **Defense in depth on the transaction state machine.** Native side
+  has `transaction_active: bool` plus a `Drop for NativeBouncer`
+  that issues `ROLLBACK` if the handle dies with a transaction open.
+  Python `Transaction` has `_finished` plus a `__del__` rollback
+  fallback. Two layers, neither fighting the other.
+- `prepare_cached(&sql)` for `tx.execute` is a sensible default for
+  repeated SQL.
+- `py_to_value` checks `PyBool` before `extract::<i64>()`, which
+  avoids the standard Python pitfall that `bool` is a subclass of
+  `int`.
+- `_coerce_params` rejects bare strings and bytes that would
+  otherwise iterate char-wise — common Python footgun, well caught.
+- Cross-surface tests run in both directions
+  (`test_python_claim_is_visible_to_sql_extension` and
+  `test_sql_created_lease_is_visible_to_python`).
+- `test_transaction_execute_binds_positional_parameters` is the
+  right shape of test for the positional-binding contract.
+
+### Findings
+
+- [F1] **Three test gaps on the in-transaction verbs.** Same pattern
+  Phase 006 caught (`[F10]` / `[F11]`) and Phase 007 caught for
+  `Savepoint` (`[F5]`). The Python tests cover `tx.execute` and
+  `tx.claim` extensively but never directly test:
+
+  - `tx.inspect` returning a live lease inside an active transaction
+  - `tx.renew` happy path inside an active transaction
+  - `tx.release` happy path inside an active transaction
+
+  The native methods exist (`inspect_in_transaction`,
+  `renew_in_transaction`, `release_in_transaction`) and the Python
+  delegations exist (`Transaction.inspect`, `Transaction.renew`,
+  `Transaction.release`) but they have zero direct coverage. Add
+  three small tests:
+
+  - `test_transaction_inspect_returns_live_lease`
+  - `test_transaction_renew_extends_lease`
+  - `test_transaction_release_clears_owner`
+
+- [F2] **`db.transaction()` without `with` is an undocumented real
+  usage path.** `Bouncer.transaction()` opens `BEGIN IMMEDIATE`
+  eagerly and returns a `Transaction`. A user who writes
+  `tx = db.transaction(); tx.execute(...); tx.commit()` (no `with`)
+  gets correct behavior. But if they forget `commit()` or
+  `rollback()`, the transaction leaks until GC fires `__del__` (or
+  the native `Drop`). The README example uses `with` exclusively,
+  the spec-diff says "explicit context manager," but nothing
+  enforces it. Two reasonable fixes:
+
+  1. Document that `with` is the V1 path; non-`with` use is
+     undefined.
+  2. Make `Bouncer.transaction()` return a context-manager-only
+     object (raise on `__enter__` if already entered, raise on
+     direct method call before `__enter__`).
+
+  Option 1 is the V1 line of least resistance.
+
+- [F3] **`Transaction.__del__` is a smell.** Python `__del__` is
+  non-deterministic and exception-swallowing. The native
+  `Drop for NativeBouncer` is the real safety net: it gets the
+  rollback right under any GC ordering because Python tears down
+  referents in reverse, so the Python `Transaction` always drops
+  first while the native handle still has `transaction_active = true`.
+  The Python `__del__` adds a second path that is harder to reason
+  about. Removing it would make the design cleaner. Not a bug, just
+  architectural redundancy.
+
+- [F4] **Rust edition mismatch.** `bouncer-py/Cargo.toml` uses
+  `edition = "2024"`, while `bouncer-core` and `bouncer-extension`
+  use `edition = "2021"`. Forward-compatible, but the family is
+  inconsistent. Pick one and pin in the next phase that touches
+  `Cargo.toml`.
+
+- [F5] **`make test-rust` does not include `bouncer-extension`.**
+  It runs `cargo test -p bouncer -p bouncer-core`. The extension is
+  thin and the cross-surface Python test exercises the real
+  artifact, so this is probably fine, but worth confirming the
+  extension truly has no inline tests being skipped.
+
+- [F6] **`Drop for NativeBouncer` swallows `ROLLBACK` errors.**
+  Standard Drop pattern (`let _ = ...`); propagating from `Drop` is
+  awkward in Rust. In practice the `ROLLBACK` only fails on a dead
+  connection, where the alternative would be to panic. Acceptable,
+  worth knowing.
+
+### Health checks
+
+- `make test`: 61 Rust passed (35 wrapper + 26 core), 11 Python
+  passed
+- `cargo clippy` against `bouncer-py`'s own workspace: clean
+- `bouncer-py` correctly excluded from root workspace per `[D8]`
+  (`cargo clippy -p bouncer-py` from root errors out, which is the
+  intended isolation)
+- `models.py` returns frozen, slotted dataclasses
+- `_call(...)` provides one uniform exception path
+- Native error message for tx-during-tx is actionable:
+  "transaction is active; use the transaction handle until it
+  finishes"
+- Test file uses `try/finally` around `sqlite3.Connection`; no leaks
+  on failure
+- Root `pyproject.toml` configures `testpaths` so `pytest` works
+  from any directory
+
+### Verdict
+
+Phase 009 implementation is shippable. All fifteen contract pins
+from Decision Rounds 002 and 004 are delivered, tests are
+comprehensive on the headline contracts, and the native code is
+conservative and well-guarded. Six findings, none blocking:
+
+- Fold into 009 before closeout: `[F1]` (three missing tx-verb
+  tests), `[F2]` (document that `with` is the V1 path)
+- Track for next phase: `[F3]` (remove `Transaction.__del__`),
+  `[F4]` (Rust edition alignment)
+- Confirm and move on: `[F5]` (extension test coverage), `[F6]`
+  (`Drop` rollback swallowing is intentional)
+
+## Decision Round 005
+
+### Responding to
+
+- Review Round 003 `[F1]` through `[F6]`
+- human preference to fold the small correctness/DX items into Phase
+  009 and track the cleanup items without expanding this closeout
+
+### Decisions
+
+- [D23] Accept `[F1]`. Add direct Python transaction-handle tests for
+  `tx.inspect`, `tx.renew`, and `tx.release` so every exposed
+  transaction lease verb has direct coverage.
+  Target:
+  - `packages/bouncer-py/tests/test_bouncer.py`
+
+- [D24] Accept `[F2]` with documentation, not a runtime redesign. The
+  supported Python V1 transaction shape is `with db.transaction() as
+  tx:`. Direct non-context-manager use is not the documented contract
+  even if the object currently allows it.
+  Target:
+  - `packages/bouncer-py/README.md`
+  - `SYSTEM.md`
+
+- [D25] Accept `[F3]` as a next-phase cleanup note. The Python
+  `Transaction.__del__` rollback path is redundant with native
+  `NativeBouncer` rollback-on-drop safety and should be reconsidered
+  when the Python binding is next touched.
+  Target:
+  - `ROADMAP.md`
+
+- [D26] Accept `[F4]` as a next-phase consistency note. The `bouncer-py`
+  Rust edition should be aligned with the family standard if the next
+  binding/tooling phase touches `Cargo.toml`.
+  Target:
+  - `ROADMAP.md`
+
+- [D27] Confirm `[F5]`. `make test-rust` intentionally covers
+  `bouncer` and `bouncer-core`; `bouncer-extension` has no inline tests
+  today, and Phase 009 exercises the built extension artifact through
+  Python/sqlite3 interop tests.
+  Target:
+  - no code change
+
+- [D28] Confirm `[F6]`. Swallowing rollback errors in `Drop for
+  NativeBouncer` is intentional Rust `Drop` behavior. The explicit
+  transaction paths propagate commit/rollback errors; the drop path is
+  best-effort cleanup.
+  Target:
+  - no code change
+
+### Verdict
+
+Fold in `[D23]` and `[D24]`, track `[D25]` and `[D26]`, and close Phase
+009 after the Python tests pass again and the commit trace is updated.
