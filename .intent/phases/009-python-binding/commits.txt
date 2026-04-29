@@ -1,3 +1,9 @@
 # Commits
 
-No git commit has been created for this phase yet.
+- `de83aae` — Add Bouncer Python binding
+
+Verification before commit:
+
+- `make test`
+- `cargo clippy -p bouncer -p bouncer-core --all-targets -- -D warnings`
+- `cargo clippy --manifest-path packages/bouncer-py/Cargo.toml --all-targets -- -D warnings`
