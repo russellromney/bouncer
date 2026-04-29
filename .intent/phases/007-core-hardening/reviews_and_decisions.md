@@ -258,3 +258,72 @@ intentional gap.
 Phase 007 should close after the in-phase fixes, health checks, and
 commit trace. The next product phase is the first non-Rust binding,
 preferably Python.
+
+## Review Round 002
+
+### Reviewing
+
+- the post-Decision-Round-002 state of the implementation, now landed
+  as commit `3ecd3af Harden Bouncer Rust wrapper surfaces` plus
+  `5b10804 Record Phase 007 commit trace`
+- `cargo test -p bouncer -p bouncer-honker` (61/61 passing) and
+  `cargo clippy -p bouncer --all-targets` (clean)
+- the diff against `SYSTEM.md`, `ROADMAP.md`, `CHANGELOG.md`,
+  `packages/bouncer/src/lib.rs`, and the test modules
+
+### Decision-vs-delivery scorecard
+
+- [D4] sleep cleanup — no `thread::sleep` remaining anywhere in
+  `packages/bouncer/src/`
+- [D5] `SYSTEM.md` recommended-default block plus Phase 007 baseline
+  — landed
+- [D6] `ROADMAP.md` next-steps no longer lists hardening; the
+  baseline section captures the new proofs and Python is next —
+  landed
+- [D7] `Savepoint::rollback(mut self)` is terminal and consumes the
+  handle — landed at `packages/bouncer/src/lib.rs:229`
+- [D8] direct savepoint `renew` and `release` tests — landed as
+  `savepoint_handle_renew_extends_existing_lease` and
+  `savepoint_handle_release_clears_live_owner`
+- [D9] canonical "savepoint commit plus outer rollback discards
+  changes" proof — landed as
+  `savepoint_commit_then_outer_rollback_discards_changes`
+- [D10] cross-connection durability for the savepoint path — landed
+  as `savepoint_commit_is_visible_to_fresh_connection_after_outer_commit`
+- [D11] `[F8]` `#[path]` style intentionally deferred — confirmed
+- [D12] nested savepoints intentionally gapped — confirmed
+- [D13] commit trace recorded in `commits.txt` — landed
+
+All eight in-phase decisions delivered. Both deferred items remain
+correctly deferred.
+
+### Findings
+
+No new findings on this pass. One non-blocking observation:
+
+- [F11] `Savepoint::rollback(mut self)` issues two SQL statements
+  back-to-back via rusqlite's `Savepoint::rollback(&mut self)` and
+  `Savepoint::commit(self)`:
+
+      self.sp.rollback()?;   // ROLLBACK TO sp_X
+      self.sp.commit()?;     // RELEASE sp_X
+
+  Functionally correct and matches the terminal-rollback intent in
+  `[D7]`. A `execute_batch("ROLLBACK TO X; RELEASE X")` would save a
+  round trip but at the cost of bypassing rusqlite's named API. The
+  current shape is more readable. Not a finding to act on.
+
+### Health checks
+
+- `cargo test -p bouncer -p bouncer-honker`: 61 passed, 0 failed
+- `cargo clippy -p bouncer --all-targets`: clean
+- `packages/bouncer/src/lib.rs`: 247 lines, public surface only
+- test bulk lives in `packages/bouncer/src/tests.rs` and
+  `packages/bouncer/src/tests_transaction.rs`
+
+### Verdict
+
+Phase 007 is closed-ready. All Decision Round 002 acceptances are
+implemented, no new blocking findings, no unresolved plan promises.
+The next product phase is the first non-Rust binding, preferably
+Python.
