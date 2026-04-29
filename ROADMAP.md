@@ -94,6 +94,76 @@ story needs it, and keep the same terminal handle shape:
 - `rollback(self)` rolls back to and releases the nested savepoint
 - outer rollback still discards all nested work
 
+### Language bindings strategy
+
+Bouncer should match Honker's binding footprint where a language's
+stdlib SQLite extension-load path is awkward enough that hiding it
+inside a typed wrapper carries real value. Don't preemptively build
+bindings for languages where the SQL extension is one-line to load
+and the four `bouncer_*` SQL functions are easy to call directly.
+
+Each binding lands when a real consumer in that language asks. This
+section exists so future-us doesn't accidentally build a Node binding
+just because Honker has one.
+
+Currently shipped:
+
+- **Rust** (`packages/bouncer`) — links `bouncer-core` directly. The
+  binding's value beyond the SQL extension is compile-time `&mut self`
+  exclusivity on `Bouncer::transaction()` and the `Savepoint` handle.
+  This is real and not replicable in raw SQL.
+- **Python** (`packages/bouncer-py`) — PyO3 binding linking
+  `bouncer-core`. Hides stdlib `sqlite3`'s 3-step
+  `enable_load_extension(True) → load_extension(path) →
+  enable_load_extension(False)` dance, which sits behind a
+  Python-level permission gate. Also adds typed dataclass results,
+  context-manager transactions, and `now_ms` injection.
+
+Likely future bindings, in priority order if and when a consumer
+asks:
+
+1. **Go** — highest awkwardness in the family. `mattn/go-sqlite3`
+   requires registering a custom `sqlite3` driver with a `ConnectHook`
+   that loads the extension on every pool connection, and Honker's
+   `honker-go` uses an atomic counter to mint unique driver names so
+   multiple databases in one process don't collide. Replicating that
+   per Bouncer caller is the worst extension-load story we've seen.
+2. **Ruby** — same 3-step `enable_load_extension(true) →
+   load_extension(path) → enable_load_extension(false)` dance Python
+   has. Honker's `honker-ruby` hides it; a Bouncer-Ruby binding would
+   too.
+3. **Elixir** — same 3-step dance via Exqlite
+   (`Sqlite3.enable_load_extension → SELECT load_extension(?) →
+   enable_load_extension(false)`). Honker's `honker-ex` hides it.
+4. **Node** — Honker's `honker-node` is FFI-linked via napi-rs, so
+   no `load_extension` involved. A Bouncer-Node binding following the
+   same FFI pattern would mostly add typed result objects and tx
+   wrapping, not awkwardness-hiding. Lower marginal value than Python
+   had, but worth Honker-stack parity.
+5. **Bun** — `raw.loadExtension(path)` is a one-liner. The only reason
+   to build a binding is Honker-stack parity. Lowest priority.
+
+Languages we will not pursue without a strong consumer:
+
+- **C++** — niche. The Honker family's C++ pattern is Zig + direct C
+  SQLite API; that style does not benefit from the kind of typed
+  wrapping Bouncer offers.
+- **Java, .NET, Swift, etc.** — same posture. Build only when a real
+  consumer arrives.
+
+Why this differs from Honker's posture:
+
+Honker has 7 bindings because Honker's surface is large and
+shape-hostile to raw SQL: queues, streams, locks, rate-limit, tasks,
+fanout; rich state with Job objects, payload deserialization, ack /
+nack semantics, retry config. Per-language wrapping pays off because
+hand-rolling every one of those verbs against the SQL extension is
+real work. Bouncer has four verbs, single-scalar SQL returns, and a
+four-field result struct. The marginal value of a binding is small
+unless the language's stdlib SQLite path is awkward enough to make
+the extension dance the dominant cost. Add bindings selectively, not
+by default.
+
 ### DST-forward (deterministic simulation testing)
 
 Honker and its siblings (bouncer-core, future queue/retry/scheduler
