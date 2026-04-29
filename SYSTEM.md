@@ -19,6 +19,8 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
 - `release` succeeds only for the current live owner and clears ownership without resetting fencing state.
 - The current proof includes file-backed multi-connection tests against a shared SQLite database file.
 - `packages/bouncer` exposes an owned `Bouncer` wrapper and a borrowed `BouncerRef<'a>`.
+- `packages/bouncer` now also exposes a sanctioned wrapper-owned
+  `Transaction<'db>` handle via `Bouncer::transaction()`.
 - The wrapper requires explicit `bootstrap()` and does not silently create schema state in `open(path)`.
 - Wrapper convenience methods use system time for lease expiry bookkeeping only.
 - `bouncer-honker` now exposes both transaction-owning Rust helpers
@@ -34,9 +36,16 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
   model: in autocommit mode they open their own `BEGIN IMMEDIATE`
   through the core helpers, and inside an existing transaction or
   savepoint they reuse the caller's current atomic boundary.
+- `Bouncer::transaction()` now uses Rust borrow exclusivity to prevent
+  same-wrapper autocommit calls or a second wrapper-owned transaction
+  from overlapping the open transaction on that connection.
+- The wrapper transaction handle exposes `inspect`, `claim`, `renew`,
+  `release`, `conn()`, `commit()`, and `rollback()`.
 - Wrapper tests now also prove borrowed-path commit/rollback,
   multi-mutator transactions, semantic-stress behavior, and savepoint
   participation on the same database file.
+- Wrapper tests now also prove transaction-handle commit/rollback,
+  direct `inspect` and `renew`, drop-rollback, and semantic parity.
 - Contention semantics are still primarily proven at the core layer; the wrapper proves thin delegation, interop, and borrowed transaction participation rather than a new concurrency model.
 - a real `bouncer-extension` loadable-extension crate exists in the workspace.
 - `bouncer-honker` now also owns the first `bouncer_*` SQL function registration surface via `attach_bouncer_functions`.

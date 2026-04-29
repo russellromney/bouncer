@@ -36,6 +36,8 @@ ownership and other single-machine coordination.
 - transactional SQL mutators that can participate in an already-open caller transaction
 - borrowed Rust mutators that can participate in a caller-owned
   transaction or savepoint without tripping nested transactions
+- sanctioned wrapper-owned Rust transactions for atomic business writes
+  plus lease mutations on one connection
 - wrapper convenience methods that stay thin and keep explicit-time control in the core
 
 ## V1 shape

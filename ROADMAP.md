@@ -29,6 +29,8 @@ The repo now has a real Phase 001 Rust core:
 - deferred multi-connection writer contention is now pinned as a lock/busy failure in the in-transaction SQL path
 - borrowed Rust mutators now follow the same transaction model as the SQL extension instead of tripping nested-transaction errors on caller-owned transactions
 - the core now exposes explicit public `*_in_tx` helpers with a fail-fast transaction-state guard
+- the wrapper now exposes a sanctioned `Bouncer::transaction()` handle
+  with checked `BEGIN IMMEDIATE` semantics and same-wrapper exclusivity
 
 The intended model is:
 
@@ -43,9 +45,11 @@ The intended model is:
 
 ## Next build steps
 
-1. Add docs/examples that show the SQL surface, owned Rust wrapper, and borrowed Rust transaction path against the same file.
-2. Make `BEGIN IMMEDIATE` the default transactional SQL example and document the three practical outcomes new users can hit: lease busy, writer-lock busy, and timeout-mediated busy.
-3. Pressure-test Bouncer by spiking one Honker scheduler ownership path on top of it, then decide whether the next public move is transaction ergonomics or another binding.
+1. Do one focused hardening pass on the settled core surfaces:
+   savepoint surface, cross-connection durability proof, fragile timing
+   tests, file-size cleanup, and clearer default-surface docs.
+2. Prove the shape with one non-Rust binding, preferably Python, before
+   moving on to broader docs/examples or more bindings.
 
 ## Future proposals
 

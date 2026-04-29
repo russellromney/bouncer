@@ -45,6 +45,37 @@ configure those connections first, then call `bootstrap()`. In practice
 that usually means `journal_mode=WAL` plus a non-zero `busy_timeout`.
 The wrapper stays pragma-neutral on purpose.
 
+To combine a business write and a lease mutation atomically, open a
+transaction handle. `wrapper.transaction()` takes `&mut self`, so the
+borrow checker prevents a second open transaction or a stray
+autocommit call on the same `Bouncer` while one is alive.
+
+```rust
+use std::time::Duration;
+
+use bouncer::{Bouncer, ClaimResult};
+use rusqlite::params;
+
+let mut db = Bouncer::open("app.sqlite3")?;
+db.bootstrap()?;
+
+let tx = db.transaction()?;
+tx.conn().execute(
+    "INSERT INTO jobs(payload) VALUES (?1)",
+    params!["work"],
+)?;
+match tx.claim("scheduler", "worker-a", Duration::from_secs(30))? {
+    ClaimResult::Acquired(_) => tx.commit()?,
+    ClaimResult::Busy(_) => tx.rollback()?,
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`tx.conn()` returns the underlying `rusqlite::Connection` for prepared
+statements and business writes inside the same atomic boundary. Don't
+issue `BEGIN` / `COMMIT` / `ROLLBACK` through it — call the handle's
+`commit()` / `rollback()` (or drop the handle to roll back).
+
 If you need deterministic time control for tests or simulation work,
 drop down to `bouncer-honker`, where the core contract still takes
 explicit `now_ms` / `ttl_ms` values.

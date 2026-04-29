@@ -94,3 +94,26 @@ Changed:
   reused instead of triggering a nested-transaction failure
 - `BouncerRef` now uses `borrowed()` instead of the old `as_ref()`
   method name
+
+### Phase 006 — Rust transaction handle
+
+Added:
+
+- sanctioned wrapper-owned `Bouncer::transaction()` path in
+  `packages/bouncer`
+- `Transaction<'db>` handle with `inspect`, `claim`, `renew`,
+  `release`, `conn()`, `commit()`, and `rollback()`
+- wrapper tests for transaction-handle commit/rollback,
+  multi-mutator commit/rollback, drop-rollback, direct `inspect`,
+  direct `renew`, and semantic parity
+- wrapper README example for combining a business write and a lease
+  mutation in one `BEGIN IMMEDIATE` transaction boundary
+
+Changed:
+
+- `Bouncer::transaction()` now takes `&mut self` and uses the checked
+  `transaction_with_behavior(TransactionBehavior::Immediate)` path
+  instead of `new_unchecked`
+- same-wrapper autocommit calls and a second wrapper-owned transaction
+  can no longer overlap the open transaction through this sanctioned
+  wrapper path
