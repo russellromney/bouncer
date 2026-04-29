@@ -43,31 +43,49 @@ primary correctness surface here is `bouncer-core`.
 
 - Keep the runner inside `bouncer-core` tests for now. Do not create a
   shared simulator crate yet.
-- Use in-memory SQLite for the first runner unless implementation finds
-  a reason that file-backed state is necessary for a specific invariant.
+- Put the runner in `bouncer-core/tests/invariants.rs`, not inline in
+  `bouncer-core/src/lib.rs`. The core file is already large, and an
+  integration test keeps the runner honest by using the public API.
+- Use in-memory SQLite with default pragmas for this phase.
 - Use explicit `now_ms` only. Do not read system time.
 - Do not add random OS threads or concurrency in this phase. SQLite
   contention is Phase 012.
-- Prefer a tiny deterministic RNG implemented in test code or an
-  already-present dev dependency. Do not add a large property-testing
-  framework unless it clearly improves replayability and keeps the code
-  understandable.
+- Exclude `claim_in_tx`, `renew_in_tx`, and `release_in_tx` from this
+  phase. Caller-owned transaction behavior belongs in Phase 012's
+  SQLite behavior matrix.
+- Use a tiny xorshift64-style deterministic RNG implemented in test
+  code. Do not add a property-testing dependency for V1.
+- Use 4 resource names and 6 owner names.
+- Run 100 steps across 1000 seeds in the default generated test.
+  Optionally add an ignored stress test with larger budgets if the
+  implementation stays cheap.
+- Use sequence-monotonic mutation time. Allow read operations to sample
+  non-monotonic times around lease boundaries.
+- Assert through both layers: public API calls for user-facing
+  invariants, direct table reads for row-shape invariants such as
+  post-release `owner = NULL`, `lease_expires_at_ms = NULL`, and token
+  preservation.
 - Treat generated checks as additional proof, not a replacement for the
   named scenario tests.
+- If the runner finds a real core bug, a small direct fix is in scope
+  for this phase. If the fix is broad or changes intended semantics,
+  split runner and fix into separate phases after a decision round.
 
 ## Proposed implementation approach
 
-Add a test module under `bouncer-core/src/lib.rs` or split test-only
-helpers if the file gets too large. The runner can be simple:
+Add an integration test at `bouncer-core/tests/invariants.rs`. The
+runner can be simple:
 
 1. Define an `Op` enum for generated operations.
 2. Define a small deterministic RNG from `u64` seed to choices.
 3. Define a model state per resource with last known token, optional
    live lease, and the current model time.
-4. Generate a bounded sequence for each seed.
+4. Generate a bounded sequence for each seed: 100 steps across 1000
+   seeds in the default test.
 5. Apply each operation to SQLite through `bouncer-core`.
 6. Apply the expected semantic effect to the model.
-7. After every step, assert model/SQLite agreement.
+7. After every step, assert model/SQLite agreement through public API
+   reads and, where row shape matters, direct `bouncer_resources` reads.
 
 The model does not need to replicate every SQL detail. It only needs to
 encode Bouncer's intended lease semantics clearly enough to catch drift:
@@ -76,15 +94,17 @@ operations should mutate or not mutate.
 
 ## Build order
 
-1. Add test-only operation and model structs.
-2. Add a deterministic RNG helper and fixed seed list.
-3. Implement operation generation across several resource names and
-   owner names.
-4. Implement model update helpers for claim/renew/release/time.
-5. Implement invariant assertions after each operation.
-6. Add one named fixed-sequence test that is easy to read.
-7. Add one generated test over many seeds and bounded sequence length.
-8. Run core tests, then full Rust tests if practical.
+1. Add `bouncer-core/tests/invariants.rs`.
+2. Add test-only operation and model structs.
+3. Add a xorshift64 deterministic RNG helper and fixed seed list.
+4. Implement operation generation across 4 resource names and 6 owner
+   names.
+5. Implement model update helpers for claim/renew/release/time.
+6. Implement invariant assertions after each operation.
+7. Add one named fixed-sequence test that is easy to read.
+8. Add one generated test over 1000 seeds × 100 steps.
+9. Optionally add an ignored stress test if it remains cheap and useful.
+10. Run core tests, then full Rust tests if practical.
 
 ## Acceptance
 
@@ -101,8 +121,12 @@ operations should mutate or not mutate.
   - reclaim after release
 - Failures identify the seed and step.
 - Tests are deterministic across runs.
-- No production code changes unless review finds an unavoidable test seam
-  that belongs in production.
+- Default generated test budget is pinned at 1000 seeds × 100 steps.
+- Runner uses public core APIs for lease behavior and direct table reads
+  only for row-shape checks.
+- Python tests still pass if any production core code changes.
+- Production code changes happen only for a real core bug found by the
+  runner; broad or ambiguous fixes split into a follow-up phase.
 
 ## Tests and evidence
 
@@ -123,14 +147,16 @@ operations should mutate or not mutate.
 - Do not use wall-clock sleeps.
 - Do not fold in SQLite lock contention. That needs a matrix and clearer
   failure taxonomy in Phase 012.
+- Do not fold in caller-owned transaction generation. The `*_in_tx`
+  path joins the SQLite behavior matrix in Phase 012.
 - Do not make failures impossible to reproduce by hiding the seed or
   relying on global randomness.
+- Check runtime before increasing budgets; repeated `claim`/`renew`/
+  `release` calls reprepare SQL today, so budget creep can get noisy.
 
 ## Files likely to change
 
-- `bouncer-core/src/lib.rs`
-- possibly a new `bouncer-core/src/tests_invariants.rs` if splitting the
-  test module keeps files easier to review
+- `bouncer-core/tests/invariants.rs`
 - `.intent/phases/011-deterministic-invariant-runner/*`
 - `CHANGELOG.md` at closeout
 - `SYSTEM.md` at closeout only if the runner lands and becomes part of
@@ -151,6 +177,8 @@ operations should mutate or not mutate.
   happens, stop and write the ambiguity into
   `reviews_and_decisions.md` rather than silently choosing behavior in
   code.
+- The runner may expose a real implementation bug. Small direct fixes
+  are in scope; large or semantic fixes split into a follow-up phase.
 - A too-clever generator will be worse than a smaller readable one.
   The first version should privilege clear invariants and replay.
 - If the generated tests are slow, reduce seeds/steps for default CI and
@@ -164,10 +192,4 @@ operations should mutate or not mutate.
 
 ## Ambiguities noticed during planning
 
-- Whether to allow non-monotonic generated `now_ms` for mutation
-  operations. Initial recommendation: keep mutation time mostly
-  monotonic per sequence, but sample reads around boundaries. If review
-  wants fully arbitrary mutation times, pin the expected semantics first.
-- Whether to use a property-testing crate. Initial recommendation:
-  avoid it for V1 unless review strongly prefers `proptest` for
-  shrinking.
+- No open planning ambiguities remain after Plan Review 1 response.
