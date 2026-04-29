@@ -25,6 +25,26 @@ What changes:
   lease state machine.
 - Python transaction SQL execution should bind positional parameters
   through rusqlite. It must not interpolate user values into SQL.
+- The Python transaction is an explicit context manager. Entering
+  `with db.transaction() as tx:` commits on clean block exit and
+  rolls back on exception. Calling `tx.commit()` or `tx.rollback()`
+  inside the block marks the transaction finished, after which any
+  further `tx.*` operation and any context-manager exit action are
+  no-ops or raise `bouncer.BouncerError`.
+- While a transaction is active on a `bouncer.Bouncer` handle, all
+  top-level `db.claim`, `db.renew`, `db.release`, and `db.inspect`
+  calls on that handle raise `bouncer.BouncerError`. Callers use
+  the `tx` object for the entire transaction. This mirrors the Rust
+  wrapper's compile-time exclusivity guarantee at runtime.
+- Native binding types are non-`Sync`. The Python `Bouncer` handle
+  is single-threaded; cross-thread use requires opening a new
+  handle.
+- The Python result objects are pure-Python dataclasses with a flat
+  shape:
+  - `LeaseInfo(name, owner, token, lease_expires_at_ms)`
+  - `ClaimResult(acquired, lease, current)`
+  - `RenewResult(renewed, lease, current)`
+  - `ReleaseResult(released, name, token, current)`
 
 What does not change:
 

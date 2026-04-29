@@ -1,7 +1,13 @@
 target/
+packages/*/target/
 .venv/
+.pytest_cache/
 dist/
 build/
 __pycache__/
+*.egg-info/
+*.so
+*.dylib
+*.pyd
 node_modules/
 .DS_Store

@@ -148,3 +148,28 @@ Changed:
 - updated current docs, dependency declarations, and imports so Honker
   can eventually depend on Bouncer without the dependency direction
   reading backwards
+
+### Phase 009 — Python binding
+
+Added:
+
+- local-development Python package in `packages/bouncer-py`
+- PyO3 native module exposed as `bouncer._bouncer_native`
+- pure-Python dataclass result shapes for `LeaseInfo`, `ClaimResult`,
+  `RenewResult`, and `ReleaseResult`
+- Python `Bouncer` wrapper with explicit `bootstrap()`, `inspect`,
+  `claim`, `renew`, and `release`
+- Python transaction context manager for atomic business writes plus
+  lease mutations
+- root `Makefile` and Python dev tooling with pinned Rust, extension,
+  Python build, and Python test commands
+- Python tests for lifecycle behavior, transaction commit/rollback,
+  context-manager state, parameter binding, error mapping, and SQL
+  extension interop on one database file
+
+Clarified:
+
+- Phase 009 proves local development install and test shape only; PyPI
+  publishing remains out of scope
+- the Python binding is binding-owned and does not yet wrap caller-owned
+  `sqlite3.Connection` transactions

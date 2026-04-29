@@ -325,3 +325,223 @@ settled contract.
 
 Python remains the next product implementation phase after the
 `bouncer-core` rename lands.
+
+## Review Round 002
+
+### Reviewing
+
+- the post-Decision-Round-002 state of `plan.md` and `spec-diff.md`,
+  now using `bouncer-core` and Phase 009 numbering
+- the landed Phase 008 core-crate rename (commits `5aaf544 Rename
+  Bouncer core crate` and `4a5c35f Record Phase 008 commit trace`;
+  `bouncer-core/` exists, `bouncer-honker/` is gone)
+- whether Round 1 findings `[F1]` through `[F9]` are pinned in
+  writing in the right place
+- whether the now-tighter plan surfaces any new questions that should
+  also be pinned before implementation
+
+### Round 1 acceptances pin-check
+
+- `[F1]` wording — pinned in `plan.md` "Shape decision" section
+- `[F2]` architecture — pinned in `plan.md` "Shape decision" with
+  rationale and in `spec-diff.md` "What changes"
+- `[F3]` cross-surface verification — pinned in `plan.md` test list
+  and `spec-diff.md` "How we will verify it"
+- `[F4]` cdylib + workspace isolation — pinned in `plan.md`
+  "Shape decision" and step 2
+- `[F5]` umbrella `bouncer.BouncerError` — pinned in `plan.md`
+  Notes
+- `[F6]` `tx.execute` returns affected row count — pinned in
+  `plan.md` Notes
+- `[F7]` positional parameter binding contract — pinned in
+  `plan.md` step 3 and `spec-diff.md` "What changes"
+- `[F8]` no PyPI publication in this phase — pinned in
+  `spec-diff.md` "What does not change"
+- `[F9]` pinned make targets — `plan.md` "Pinned commands" lists
+  five concrete invocations
+
+All nine are now in the right place, and `bouncer-core` is used
+consistently in the active 009 text.
+
+### Findings
+
+- [F10] **Context-manager exit state machine is unspecified.** The
+  transactional example shows
+  `with db.transaction() as tx: ... tx.rollback()`. After explicit
+  rollback, `__exit__` will still run on block exit. The plan should
+  specify the state machine: `__exit__` on normal block exit commits
+  if the tx is not already finished; on exception rolls back;
+  explicit `tx.commit()` or `tx.rollback()` marks the tx done and
+  `__exit__` becomes a no-op. This is the kind of state machine that
+  is painful to retrofit if V1 callers wrote against ambiguous
+  behavior.
+
+- [F11] **Autocommit verbs during an open transaction are
+  unspecified.** Rust prevents this at compile time via `&mut self`
+  on `Bouncer::transaction()`. Python's runtime guard catches
+  `db.transaction()` while one is open. But what about `db.claim(...)`
+  on the same `Bouncer` while a `with db.transaction() as tx:` is
+  active? Two reasonable answers: (a) runtime error with a clear
+  message pointing at `tx.claim`; or (b) silently delegate to the
+  active transaction the way `BouncerRef` does in autocommit-mode
+  dispatch. (a) parallels the Rust compile-time guarantee and is
+  the safer V1 default. Pick one.
+
+- [F12] **PyO3 `Send`/`Sync` posture is implicit.** A `#[pyclass]`
+  holding a `rusqlite::Connection` must handle that `Connection` is
+  `Send` but not `Sync`. Two paths: `Mutex<Connection>` becomes
+  `Send + Sync` and lets the binding optionally release the GIL on
+  long calls; or `pyclass(unsendable)` keeps the object on its
+  creating thread and is simpler to reason about. For V1 the
+  simplest correct choice is "hold the GIL during all native calls
+  plus `pyclass(unsendable)`," which serializes Python threading
+  through the binding and matches the binding-owned-connection
+  mental model. Pin which way the binding goes so the implementer
+  does not invent a third path.
+
+- [F13] **Result-type shape is not pinned.** The example shape is
+  flat (`result.acquired`, `result.lease`, `result.current`) rather
+  than enum-with-data (`ClaimResult::Acquired(LeaseInfo)` vs
+  `Busy(LeaseInfo)`). The flat model is friendlier in Python but
+  loses the discriminated-union discipline. Pin which model V1
+  uses. Also pin whether `LeaseInfo` and friends are pure-Python
+  `@dataclass` types layered over plain native shapes, or PyO3
+  `#[pyclass]` types returned directly. Pure-Python dataclasses on
+  top of plain native dicts is the easier-to-evolve choice.
+
+- [F14] **`uv` is now a hard dependency for the dev workflow.**
+  `make build-py` runs `uv run --group dev maturin develop`. That
+  is a fine choice but worth stating explicitly: developers need
+  `uv` installed; non-`uv` paths are not supported in V1. Other
+  family repos use different Python toolchains, so making this
+  decision visible avoids drift.
+
+- [F15] **`bouncer-extension` build artifact path is unspecified.**
+  Cross-surface tests load `bouncer-extension` via
+  `sqlite3.enable_load_extension`. The artifact lives at
+  `target/{debug,release}/libbouncer_extension.{dylib,so}` and the
+  exact path varies by OS and build profile. Specify: `make build-ext`
+  builds in a fixed profile and the Python tests resolve the artifact
+  from a known location, or fail loudly with a clear message if the
+  artifact is missing.
+
+- [F16] **Test directory location.** `plan.md` "Files likely to
+  change" lists `tests/**` but the binding tests should live under
+  `packages/bouncer-py/tests/` to follow the package boundary.
+  Tighten to the package-local path so the root `tests/` tree does
+  not accumulate cross-cutting concerns.
+
+### Things checked and fine
+
+- Phase 008 rename is real, complete, and consistent in 009 active
+  text. Historical `bouncer-honker` mentions are correctly preserved
+  in append-only review text per `[D15]`.
+- The three-layer name story is internally consistent: `bouncer-py`
+  (cargo crate, never user-visible), `bouncer` (Python package
+  name), `bouncer._bouncer_native` (native module).
+- Pinned `make test-rust`, `build-ext`, `build-py`, `test-python`,
+  `test` cover the F9 ask.
+- "No `BouncerRef` analogue, no nested savepoints, no caller-owned
+  `sqlite3.Connection`" exclusions still hold.
+- Runtime tx guard plus binding-owned connection is the right
+  architecture for PyO3.
+- The cross-surface verification path through stdlib `sqlite3`
+  loading `bouncer-extension` is the right shape and is now
+  explicit.
+
+### Verdict
+
+The plan is meaningfully sharper than the Phase 008 version Round 1
+reviewed. `[F10]` through `[F16]` are all "pin the implementation
+detail in writing before code lands" — the same kind of small
+contract decisions that `[F2]` through `[F9]` were last round. None
+blocks implementation; collectively they prevent V1 caller code
+from being written against ambiguous behavior.
+
+Recommended next step: a Decision Round 004 that resolves `[F10]`
+through `[F16]` with one-sentence answers, then implementation can
+proceed.
+
+## Decision Round 004
+
+### Responding to
+
+- Review Round 002 `[F10]` through `[F16]`
+- cross-session agreement that these are API-contract pins, not
+  Python-rethink findings, and should be answered before code lands
+- correction of an artifact-name error in `[F15]`: the
+  `bouncer-extension` cdylib `[lib] name` is `bouncer_ext`, so the
+  built artifact is `libbouncer_ext.{dylib,so}` /
+  `bouncer_ext.dll`, not `libbouncer_extension`
+
+### Decisions
+
+- [D16] Accept `[F10]` with explicit state machine.
+  `with db.transaction() as tx:` commits on clean block exit, rolls
+  back on exception, and explicit `tx.commit()` or `tx.rollback()`
+  marks the transaction finished so `__exit__` becomes a no-op. Any
+  operation on a finished transaction raises `BouncerError`.
+  Target:
+  - `spec-diff.md`
+  - `plan.md`
+
+- [D17] Accept `[F11]` with sharpening. While a transaction is
+  active, all top-level `db.*` lease operations
+  (`claim`, `renew`, `release`, `inspect`) raise `BouncerError`.
+  Callers must use the `tx` object until it finishes. This keeps the
+  mental model "once you enter `with db.transaction() as tx`, use
+  `tx`" without case analysis on read vs write verbs.
+  Target:
+  - `spec-diff.md`
+  - `plan.md`
+
+- [D18] Accept `[F12]`. The native `#[pyclass]` types use
+  `pyclass(unsendable)`, hold the GIL during all native calls, and
+  do not support cross-thread sharing in V1. Multiple Python
+  threads that need their own handle should call `bouncer.open(...)`
+  separately.
+  Target:
+  - `plan.md`
+
+- [D19] Accept `[F13]` with the flat shape and pure-Python wrappers.
+  The native layer returns plain shapes (dicts or simple tuples),
+  and Python exposes pure `@dataclass` result objects:
+  - `LeaseInfo` carries `name`, `owner`, `token`,
+    `lease_expires_at_ms`
+  - `ClaimResult` carries `acquired: bool` plus `lease` and
+    `current`
+  - `RenewResult` carries `renewed: bool` plus `lease` and
+    `current`
+  - `ReleaseResult` carries `released: bool` plus `name`, `token`,
+    and `current`
+
+  Flat shape is more idiomatic in Python and easier to evolve
+  without breaking native ABI.
+  Target:
+  - `spec-diff.md`
+  - `plan.md`
+
+- [D20] Accept `[F14]`. `uv` is a hard development dependency for
+  Phase 009. There is no documented non-`uv` path in V1.
+  Target:
+  - `plan.md`
+
+- [D21] Accept `[F15]` with the artifact-name correction.
+  `make build-ext` builds `bouncer-extension` in the `debug`
+  profile by default. The Python tests resolve the artifact at
+  `target/debug/libbouncer_ext.{dylib,so}` on macOS and Linux and
+  `target/debug/bouncer_ext.dll` on Windows. Tests must fail
+  loudly with a clear message if the artifact is missing.
+  Target:
+  - `plan.md`
+
+- [D22] Accept `[F16]`. Python tests live under
+  `packages/bouncer-py/tests/`, not the root `tests/` tree.
+  Target:
+  - `plan.md`
+
+### Verdict
+
+Phase 009 implementation is ready once `spec-diff.md` and
+`plan.md` are patched to reflect `[D16]` through `[D22]`. After
+those pins land, code can proceed without further plan rounds.

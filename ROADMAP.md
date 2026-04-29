@@ -41,6 +41,13 @@ The repo now has a real Phase 001 Rust core:
   surface stays small and the test modules carry the test bulk
 - wrapper and system docs now name the recommended default surfaces:
   `Bouncer`, `Bouncer::transaction()`, and `BouncerRef`
+- a first Python binding now exists in `packages/bouncer-py`
+- the Python binding exposes explicit `bootstrap()`, `inspect`, `claim`,
+  `renew`, `release`, and a transaction context manager
+- Python transaction tests prove business writes and lease mutations
+  commit and roll back together
+- Python cross-surface tests prove the binding and SQLite extension share
+  one database-file contract
 
 The intended model is:
 
@@ -55,8 +62,13 @@ The intended model is:
 
 ## Next build steps
 
-1. Prove the shape with one non-Rust binding, preferably Python, before
-   moving on to broader docs/examples or more bindings.
+1. Review and harden the Python binding against first-user ergonomics:
+   docs, packaging shape, and whether caller-owned Python
+   `sqlite3.Connection` users should be served through extension docs
+   rather than a new binding surface.
+2. Start the Honker integration phase once Bouncer's Python baseline has
+   survived review: Honker scheduler/coordination leases should depend
+   on Bouncer rather than carrying a parallel lease primitive.
 
 ## Future proposals
 

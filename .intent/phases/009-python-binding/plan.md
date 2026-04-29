@@ -97,11 +97,13 @@ Notes:
 - Use `ttl_ms` in Phase 009. It is explicit, easy to test, and matches
   the SQLite surface. Friendlier `datetime.timedelta` or seconds
   coercion can come later if Python callers want it.
-- Return Python result objects/dataclasses:
-  - `LeaseInfo`
-  - `ClaimResult`
-  - `RenewResult`
-  - `ReleaseResult`
+- Return result objects as pure-Python `@dataclass` types layered
+  over plain native shapes (dicts or tuples). Native code does not
+  return `#[pyclass]` types for results. Flat shape:
+  - `LeaseInfo(name, owner, token, lease_expires_at_ms)`
+  - `ClaimResult(acquired, lease, current)`
+  - `RenewResult(renewed, lease, current)`
+  - `ReleaseResult(released, name, token, current)`
 - Expose minimal SQL execution on the transaction handle because
   otherwise Python cannot prove "business write + lease mutation" in
   one boundary.
@@ -112,6 +114,20 @@ Notes:
   with clear messages from SQLite/core errors. More specific exception
   subclasses can be added later without changing successful result
   shapes.
+- The Python transaction is a context manager.
+  `with db.transaction() as tx:` commits on clean block exit and
+  rolls back on exception. Explicit `tx.commit()` or `tx.rollback()`
+  marks the transaction finished; `__exit__` then becomes a no-op
+  and any further `tx.*` operation raises `bouncer.BouncerError`.
+- While a transaction is active on a `Bouncer` handle, all
+  top-level lease operations on that handle (`db.claim`,
+  `db.renew`, `db.release`, `db.inspect`) raise
+  `bouncer.BouncerError`. Callers must use the `tx` object until it
+  finishes. This mirrors the Rust wrapper's compile-time
+  exclusivity guarantee at runtime.
+- Native `#[pyclass]` types use `pyclass(unsendable)` and hold the
+  GIL during all native calls. The Python handle is single-threaded
+  in V1; cross-thread callers open a separate handle per thread.
 - Keep savepoints out. The Rust wrapper has one savepoint level, but
   Python should first prove the primary transaction story.
 
@@ -144,19 +160,28 @@ Notes:
    - bind SQL parameters positionally with rusqlite rather than string
      interpolation
 
-4. Add tests.
+4. Add tests under `packages/bouncer-py/tests/`.
    - explicit bootstrap is required
    - full claim / busy / inspect / renew / release cycle
    - Python claim visible to the SQL extension on the same file
    - SQL-created lease visible to Python
    - transaction commit persists business write and lease mutation
    - transaction rollback discards business write and lease mutation
-   - overlapping transactions fail loudly
+   - context-manager state machine: clean exit commits, exception
+     rolls back, explicit `commit` / `rollback` makes `__exit__` a
+     no-op and further `tx.*` raises `BouncerError`
+   - top-level `db.claim` / `db.renew` / `db.release` / `db.inspect`
+     raise `BouncerError` while a transaction is active
+   - overlapping `db.transaction()` calls fail loudly
    - errors map to `bouncer.BouncerError`
 
    The cross-surface tests should build `bouncer-extension`, load it
    through stdlib `sqlite3.enable_load_extension(True)`, and call
    `bouncer_owner` / `bouncer_token` against the same database file.
+   The built artifact lives at `target/debug/libbouncer_ext.{dylib,so}`
+   on macOS and Linux and `target/debug/bouncer_ext.dll` on Windows.
+   Tests must fail loudly with a clear message if the artifact is
+   missing.
 
 5. Update docs after implementation.
    - root README "What exists today"
@@ -200,6 +225,8 @@ Notes:
   runtime transaction guard if needed.
 - Python tests should not duplicate every core edge case. They should
   prove thin delegation, interop, and transaction behavior.
+- `uv` is a hard development dependency for Phase 009. There is no
+  documented non-`uv` build or test path in V1.
 
 ## Pinned commands
 

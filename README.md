@@ -38,6 +38,10 @@ ownership and other single-machine coordination.
   transaction or savepoint without tripping nested transactions
 - sanctioned wrapper-owned Rust transactions for atomic business writes
   plus lease mutations on one connection
+- a first local-development Python package in `packages/bouncer-py`
+  with explicit bootstrap, lease verbs, and a transaction context manager
+- Python tests proving wrapper-owned transactions and SQL extension
+  interop on the same database file
 - wrapper convenience methods that stay thin and keep explicit-time control in the core
 
 ## V1 shape
@@ -108,4 +112,6 @@ small internal primitive rather than grow into a bigger product.
 - `bouncer-extension`
   SQLite loadable extension / shared SQL surface
 - `packages/bouncer`
-  thin binding surface
+  thin Rust binding surface
+- `packages/bouncer-py`
+  thin Python binding surface

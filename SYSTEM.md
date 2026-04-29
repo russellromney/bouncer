@@ -63,6 +63,24 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
 - `packages/bouncer/src/lib.rs` stays focused on the public wrapper
   surface; wrapper tests live in split test modules.
 - Contention semantics are still primarily proven at the core layer; the wrapper proves thin delegation, interop, and borrowed transaction participation rather than a new concurrency model.
+- A local-development Python package now exists in
+  `packages/bouncer-py`.
+- The Python package imports as `bouncer` and uses a PyO3 native module
+  at `bouncer._bouncer_native`.
+- The Python binding calls `bouncer-core` directly for lease semantics
+  and keeps result objects as pure-Python dataclasses.
+- The Python binding exposes explicit `bootstrap()`, `inspect`,
+  `claim`, `renew`, and `release`.
+- The Python binding exposes a `with db.transaction() as tx:` context
+  manager for business writes plus lease mutations in one
+  `BEGIN IMMEDIATE` boundary.
+- While a Python transaction is active, top-level lease operations on
+  that handle fail loudly; callers use the transaction handle until it
+  commits or rolls back.
+- Python tests prove explicit bootstrap, full lifecycle behavior,
+  transaction commit/rollback coupling, terminal context-manager
+  behavior, parameter binding, and SQLite-extension interop on one
+  database file.
 - a real `bouncer-extension` loadable-extension crate exists in the workspace.
 - `bouncer-core` now also owns the first `bouncer_*` SQL function registration surface via `attach_bouncer_functions`.
 - The current SQL surface is:
@@ -96,4 +114,4 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
 
 - This repo is not distributed consensus.
 - This repo is not a workflow engine.
-- This repo does not yet expose non-Rust language bindings.
+- This repo does not yet publish language bindings to package registries.
