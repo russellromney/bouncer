@@ -35,6 +35,10 @@ While a transaction is active, use the `tx` object for all lease work.
 Top-level `db.claim`, `db.renew`, `db.release`, and `db.inspect` calls
 raise `BouncerError` until the transaction finishes.
 
+`tx.execute(sql, params=None)` is a single-statement helper. It binds
+positional parameters through SQLite and raises `BouncerError` for SQL
+syntax errors or multi-statement strings.
+
 Build and test from the repo root:
 
 ```bash

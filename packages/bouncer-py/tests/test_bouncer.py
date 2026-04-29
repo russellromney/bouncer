@@ -262,6 +262,32 @@ def test_errors_map_to_bouncer_error(tmp_path: Path) -> None:
         db.claim("scheduler", "worker-a", ttl_ms=0)
 
 
+def test_transaction_execute_sql_errors_map_to_bouncer_error(tmp_path: Path) -> None:
+    db = bouncer.open(tmp_path / "app.sqlite3")
+    db.bootstrap()
+
+    with db.transaction() as tx:
+        with pytest.raises(bouncer.BouncerError, match="syntax error|near"):
+            tx.execute("SELLECT 1")
+
+
+def test_transaction_execute_rejects_multiple_statements(tmp_path: Path) -> None:
+    path = tmp_path / "app.sqlite3"
+    create_business_table(path)
+    db = bouncer.open(path)
+    db.bootstrap()
+
+    with db.transaction() as tx:
+        with pytest.raises(bouncer.BouncerError, match="Multiple statements"):
+            tx.execute(
+                "INSERT INTO business_events(note) VALUES (?); "
+                "INSERT INTO business_events(note) VALUES (?)",
+                ["one", "two"],
+            )
+
+    assert business_count(path) == 0
+
+
 def test_transaction_execute_binds_positional_parameters(tmp_path: Path) -> None:
     path = tmp_path / "app.sqlite3"
     create_business_table(path)

@@ -84,6 +84,8 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
   transaction commit/rollback coupling, terminal context-manager
   behavior, parameter binding, and SQLite-extension interop on one
   database file.
+- Rust tests now also build and load the `bouncer-extension` cdylib
+  artifact through rusqlite and exercise every `bouncer_*` function.
 - a real `bouncer-extension` loadable-extension crate exists in the workspace.
 - `bouncer-core` now also owns the first `bouncer_*` SQL function registration surface via `attach_bouncer_functions`.
 - The current SQL surface is:

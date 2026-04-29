@@ -166,6 +166,8 @@ Added:
 - Python tests for lifecycle behavior, transaction commit/rollback,
   context-manager state, parameter binding, error mapping, and SQL
   extension interop on one database file
+- Rust integration test coverage for the built `bouncer-extension`
+  cdylib artifact and every registered `bouncer_*` SQL function
 
 Clarified:
 
@@ -173,3 +175,5 @@ Clarified:
   publishing remains out of scope
 - the Python binding is binding-owned and does not yet wrap caller-owned
   `sqlite3.Connection` transactions
+- Python `tx.execute` is a single-statement helper and raises
+  `BouncerError` for SQL syntax errors or multi-statement input

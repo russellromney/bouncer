@@ -719,6 +719,183 @@ conservative and well-guarded. Six findings, none blocking:
 - Confirm and move on: `[F5]` (extension test coverage), `[F6]`
   (`Drop` rollback swallowing is intentional)
 
+## Review Round 004
+
+### Reviewing
+
+- a focused pass on **testing comprehensiveness** and
+  **boundary correctness** between `bouncer-core`,
+  `bouncer-extension`, `packages/bouncer`, and
+  `packages/bouncer-py`
+- the family principle the user named: bindings should be **typed
+  wrappers** around the Rust / extension code; bindings should not
+  duplicate semantics
+- `bouncer-extension/src/lib.rs` (30 lines, a single
+  `sqlite3_bouncerext_init` shim that calls
+  `bouncer_core::attach_bouncer_functions`)
+- `bouncer-core` test coverage of the SQL surface via
+  `attached_sql_functions_cover_bootstrap_and_full_lease_cycle` and
+  the in-transaction SQL helper tests
+- Python binding hot-path code in `packages/bouncer-py/src/lib.rs`
+  and the test split between core / wrapper / extension / Python
+
+### Are the boundaries correct?
+
+Yes. Bindings link `bouncer-core` directly via rusqlite; the
+SQLite loadable extension is a parallel surface for SQL-only
+callers, not a layer that bindings sit on top of. This is the right
+shape because:
+
+- `bouncer-core` already returns rich types (`ClaimResult` with full
+  `LeaseInfo`) from one call. SQL functions return single scalars
+  by design (`bouncer_claim` returns a token or NULL; `bouncer_owner`
+  returns a string), which is the right shape for raw SQL callers
+  but the wrong shape for typed bindings.
+- The lease state machine, schema, and verb logic all live in
+  `bouncer-core`. Bindings do not reimplement any of it. The Python
+  binding calls `core::claim`, `core::claim_in_tx`, etc.
+- Routing bindings through the extension would force per-call
+  SQL parsing plus extra round trips per result, with no win on
+  semantics or types.
+
+What the Python binding *does* contain that is not pure delegation:
+
+- system-time reads at the binding edge (a UX choice the plan
+  pinned in `[D10]`-era explicit-`ttl_ms` design — not duplicated
+  semantics)
+- a `transaction_active: bool` runtime flag (the runtime substitute
+  for Rust's compile-time `&mut self` on `Bouncer::transaction`,
+  pinned in `[D17]`)
+- `PyDict` ↔ `@dataclass` marshaling (a Python idiom, pinned in
+  `[D19]`)
+
+None of these duplicate lease semantics. The "thin typed wrapper"
+principle is upheld.
+
+This pattern extends cleanly to future bindings (Node, Go, etc.):
+each binding links `bouncer-core`, owns a binding-language
+connection handle and a runtime transaction guard, returns
+language-idiomatic result types over plain native shapes. The
+extension stays for SQL-only callers and remains independent.
+
+### Where the testing pyramid is thin
+
+- [F1] **`bouncer-extension` has no first-class tests of its own.**
+  The crate is a 30-line cdylib shim around
+  `bouncer_core::attach_bouncer_functions`. Its built artifact
+  (`libbouncer_ext.{dylib,so}` / `bouncer_ext.dll`) is only
+  validated through two Python tests
+  (`test_python_claim_is_visible_to_sql_extension` and
+  `test_sql_created_lease_is_visible_to_python`). The
+  `attach_bouncer_functions` registration is tested via in-process
+  attach in `bouncer-core`, but the *loadable extension entry point*
+  (`sqlite3_bouncerext_init`) and the *built artifact* are
+  validated only by Python. SQL-only callers (the audience the
+  extension exists for) deserve a first-class Rust integration
+  test that builds the cdylib and loads it through
+  `rusqlite::Connection::load_extension`, then exercises every
+  `bouncer_*` function. This would also catch entry-point name
+  drift before Python's cross-surface tests notice.
+
+- [F2] **Three Python in-transaction verbs still have no direct
+  test.** Already named as `[F1]` in Review Round 003 and not yet
+  resolved. `tx.inspect`, `tx.renew`, and `tx.release` exist in
+  both the native binding and the Python `Transaction` class but
+  have zero direct happy-path coverage. Same gap pattern Phase
+  006 caught (`[F10]`, `[F11]`) and Phase 007 caught for
+  `Savepoint` (`[F5]`).
+
+- [F3] **No Python test that `BouncerError` covers non-lease
+  errors.** The umbrella `_call(...)` wrapper catches every native
+  error and re-raises as `BouncerError`. Lease and TTL errors are
+  exercised; a SQL syntax error in `tx.execute("SELLECT 1")` (or
+  similar) is not. One small test pins that the wrapper covers
+  raw rusqlite errors uniformly, not just core errors.
+
+- [F4] **`tx.execute` single-statement contract is undocumented
+  and untested.** `rusqlite::Statement::execute` only runs the
+  first statement of a multi-statement string. A user who passes
+  `"INSERT ...; INSERT ...;"` will silently get only the first
+  insert. This is standard SQLite behavior, but Python's stdlib
+  `sqlite3.Cursor.execute` has the same constraint and documents
+  it. Either pin the contract in `packages/bouncer-py/README.md`
+  or test that multi-statement SQL is rejected with a clear error.
+
+- [F5] **No cross-binding parity test.** There is no test that
+  asserts "Rust wrapper claims a lease, Python binding reads it,
+  both surfaces see the same `LeaseInfo` field-for-field." The
+  current cross-surface tests cover Python ↔ SQL extension, not
+  Python ↔ Rust wrapper. The transitive guarantee through the
+  core schema is strong, so this is optional rather than a real
+  gap, but if a future change drifts result-shape interpretation
+  between bindings, only an explicit parity test will catch it.
+
+- [F6] **`bouncer-extension` is not in the `make test-rust`
+  target.** The Makefile runs `cargo test -p bouncer -p bouncer-core`
+  and skips `-p bouncer-extension`. With the F1 integration test
+  in place, that target would need updating too. Until F1 lands,
+  `make test-rust` skipping the extension is fine because the
+  extension has nothing to test.
+
+### Where the testing pyramid is appropriately deep
+
+- `bouncer-core` has 26 tests covering the lease semantics, all
+  in-transaction edge cases, savepoint participation, and
+  multi-connection contention. This is the load-bearing test
+  surface.
+- `packages/bouncer` has 35 tests covering the Rust wrapper's
+  three transaction surfaces (autocommit, `Transaction`,
+  `Savepoint`), cross-connection durability, and lease-semantics
+  parity inside a transaction.
+- The Python binding has 11 tests covering the contract decisions
+  from Decision Rounds 002 and 004 (context-manager state machine,
+  top-level ops blocked during tx, overlapping tx, error mapping,
+  positional binding).
+
+So the pyramid is the right shape: deep at the core, thinner at
+each binding layer. The gaps are at the edges of layers that
+currently have no test home (the extension cdylib, the Python
+in-tx verbs, and the cross-binding parity).
+
+### Recommendations, prioritized
+
+1. **Add a Rust integration test for the loadable extension.**
+   Create `bouncer-extension/tests/extension_load.rs` that builds
+   the cdylib, loads it via `rusqlite::Connection::load_extension`,
+   runs `bouncer_bootstrap`, every `bouncer_*` verb, and asserts
+   the same `LeaseInfo` round-trips. Update `make test-rust` to
+   `cargo test -p bouncer -p bouncer-core -p bouncer-extension`.
+   This closes `[F1]` and gives the extension first-class proof
+   instead of relying on Python.
+
+2. **Add the three missing in-tx Python tests.** `[F2]` here, also
+   `[F1]` from Review Round 003. Small, mechanical.
+
+3. **Add the `BouncerError` non-lease error test.** `[F3]` here.
+   One test that asserts a SQL syntax error in `tx.execute` raises
+   `BouncerError`.
+
+4. **Pin the single-statement contract for `tx.execute`.** `[F4]`
+   here. README sentence at minimum, an explicit reject-test
+   ideally.
+
+5. (Optional) **Cross-binding parity test.** `[F5]`. Defer until a
+   future phase or until a regression motivates it.
+
+### Verdict
+
+The boundaries are correct. The Python binding is appropriately
+thin: it does not duplicate any lease semantics, only the necessary
+binding-edge glue (system time, runtime tx guard, dataclass
+marshaling). The bindings-link-core pattern extends cleanly to
+future languages without restructuring.
+
+Testing is comprehensive at the core but has real gaps at two
+layer edges: the loadable extension's cdylib has no first-class
+test home, and the Python in-tx verbs have no direct coverage.
+`[F1]` and `[F2]` are the highest-value adds; `[F3]` and `[F4]`
+are small completeness items; `[F5]` is optional.
+
 ## Decision Round 005
 
 ### Responding to
@@ -774,3 +951,74 @@ conservative and well-guarded. Six findings, none blocking:
 
 Fold in `[D23]` and `[D24]`, track `[D25]` and `[D26]`, and close Phase
 009 after the Python tests pass again and the commit trace is updated.
+
+## Decision Round 006
+
+### Responding to
+
+- Review Round 004 `[F1]` through `[F6]`
+- human prompt about testing comprehensiveness and whether bindings
+  should be typed wrappers over the Rust/extension boundary
+
+### Decisions
+
+- [D29] Accept the boundary conclusion. Future typed bindings should
+  link `bouncer-core` directly for rich result types and shared lease
+  semantics. `bouncer-extension` remains the parallel SQL-only caller
+  surface, not a layer that typed bindings route through.
+  Target:
+  - no code change
+
+- [D30] Accept `[F1]` with a packaging caveat. A normal SQLite
+  load-extension test cannot live inside `bouncer-extension` itself
+  because that crate must compile rusqlite with `loadable_extension`,
+  which cannot open ordinary SQLite connections in the test binary.
+  Instead, the Rust wrapper package now hosts a first-class integration
+  test that builds `bouncer-extension`, loads the built cdylib through
+  `rusqlite::Connection::load_extension`, and exercises every
+  `bouncer_*` function.
+  Target:
+  - `packages/bouncer/tests/extension_load.rs`
+  - `packages/bouncer/Cargo.toml`
+  - `SYSTEM.md`
+  - `CHANGELOG.md`
+
+- [D31] `[F2]` is already closed by `[D23]` and commit `e9dfec4`.
+  Direct tests for `tx.inspect`, `tx.renew`, and `tx.release` now exist.
+  Target:
+  - no new code change
+
+- [D32] Accept `[F3]`. Add a Python test proving `BouncerError` wraps a
+  non-lease rusqlite error from `tx.execute`.
+  Target:
+  - `packages/bouncer-py/tests/test_bouncer.py`
+
+- [D33] Accept `[F4]` with correction. `tx.execute` does not silently
+  run only the first statement; rusqlite rejects multi-statement input
+  with `Multiple statements provided`. Document and test that
+  `tx.execute` is a single-statement helper and raises `BouncerError`
+  for multi-statement SQL.
+  Target:
+  - `packages/bouncer-py/README.md`
+  - `packages/bouncer-py/tests/test_bouncer.py`
+
+- [D34] Defer optional `[F5]`. Cross-binding Rust-wrapper-write →
+  Python-read parity is useful but not needed for Phase 009 closeout
+  because Python ↔ SQL extension and Rust wrapper ↔ SQL/core interop
+  already cover the shared database-file contract.
+  Target:
+  - no code change
+
+- [D35] Accept `[F6]` by making the extension artifact proof part of
+  the existing Rust test path. `make test-rust` still runs
+  `cargo test -p bouncer -p bouncer-core`; the extension-load test is
+  hosted under `packages/bouncer` to avoid rusqlite feature conflicts
+  and builds the extension artifact itself.
+  Target:
+  - `Makefile`
+
+### Verdict
+
+The boundary model stands. The extension artifact now has a Rust-side
+load test, Python error mapping covers raw SQL failures, and
+`tx.execute`'s single-statement behavior is documented and tested.

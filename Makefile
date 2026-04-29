@@ -3,7 +3,7 @@
 help:
 	@echo "bouncer development targets"
 	@echo ""
-	@echo "  make test-rust   - cargo test for Rust core and wrapper"
+	@echo "  make test-rust   - cargo test for Rust core, wrapper, and extension artifact"
 	@echo "  make build-ext   - build the SQLite loadable extension"
 	@echo "  make build-py    - build/install the Python extension with maturin"
 	@echo "  make test-python - build extension + Python package and run pytest"
