@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bouncer_honker as core;
+use bouncer_core as core;
 use rusqlite::{
     Connection, Savepoint as SqlSavepoint, Transaction as SqlTransaction, TransactionBehavior,
 };

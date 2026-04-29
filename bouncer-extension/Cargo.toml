@@ -13,5 +13,5 @@ name = "bouncer_ext"
 crate-type = ["cdylib"]
 
 [dependencies]
-bouncer-honker = { path = "../bouncer-honker", version = "0.1.0" }
+bouncer-core = { path = "../bouncer-core", version = "0.1.0" }
 rusqlite = { version = "0.39.0", features = ["loadable_extension"] }

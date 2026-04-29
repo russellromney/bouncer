@@ -1,4 +1,4 @@
 [workspace]
-members = ["bouncer-honker", "bouncer-extension", "packages/bouncer"]
-default-members = ["bouncer-honker", "packages/bouncer"]
+members = ["bouncer-core", "bouncer-extension", "packages/bouncer"]
+default-members = ["bouncer-core", "packages/bouncer"]
 resolver = "2"

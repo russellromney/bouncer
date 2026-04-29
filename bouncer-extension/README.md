@@ -12,7 +12,7 @@ first `bouncer_*` SQL helpers:
 - `bouncer_owner(name, now_ms)`
 - `bouncer_token(name)`
 
-The SQL surface stays explicit about time. It reuses `bouncer-honker`
+The SQL surface stays explicit about time. It reuses `bouncer-core`
 for schema and lease semantics rather than reimplementing them in SQL.
 
 ## Loading the extension

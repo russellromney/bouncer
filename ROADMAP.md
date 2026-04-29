@@ -16,14 +16,14 @@ Its job is not to become a scheduler or workflow system. Its job is to provide a
 
 The repo now has a real Phase 001 Rust core:
 
-- `bouncer-honker` owns the first SQLite schema
+- `bouncer-core` owns the first SQLite schema
 - the core contract exposes `inspect`, `claim`, `renew`, and `release`
 - fencing tokens are monotonic across expiry, release, and re-claim
 - Rust tests pin the current semantics
 - a first Rust wrapper crate now exists in `packages/bouncer`
 - the wrapper stays thin, keeps bootstrap explicit, and leaves time-ordering concerns out of scope
 - a first SQLite loadable-extension crate now exists in `bouncer-extension`
-- the first `bouncer_*` SQL surface reuses `bouncer-honker` semantics and keeps `now_ms` explicit
+- the first `bouncer_*` SQL surface reuses `bouncer-core` semantics and keeps `now_ms` explicit
 - SQL/Rust interop is now proven on one database file
 - SQL mutators now participate in caller-owned explicit transactions and savepoints instead of failing with SQLite's nested-transaction error
 - deferred multi-connection writer contention is now pinned as a lock/busy failure in the in-transaction SQL path
@@ -46,7 +46,7 @@ The intended model is:
 
 - `honker`
   generic queue / wake / retry substrate
-- `bouncer-honker`
+- `bouncer-core`
   Bouncer-specific schema and SQLite contract
 - `bouncer-extension`
   shared SQLite-facing SQL boundary
@@ -60,9 +60,25 @@ The intended model is:
 
 ## Future proposals
 
+### Nested wrapper savepoints
+
+The Rust wrapper now has one sanctioned savepoint level through
+`Transaction::savepoint()`. Nested savepoints are a plausible future
+ergonomic surface, especially if a binding wants nested context
+managers or an ORM/framework integration needs local rollback scopes
+inside a larger transaction.
+
+Do not add this just because SQLite supports it. Add it when a caller
+story needs it, and keep the same terminal handle shape:
+
+- opening a nested boundary borrows the parent savepoint mutably
+- `commit(self)` releases the nested savepoint
+- `rollback(self)` rolls back to and releases the nested savepoint
+- outer rollback still discards all nested work
+
 ### DST-forward (deterministic simulation testing)
 
-Honker and its siblings (bouncer-honker, future queue/retry/scheduler
+Honker and its siblings (bouncer-core, future queue/retry/scheduler
 primitives) should be testable under deterministic simulation: every
 source of non-determinism flows through a seam the test harness
 controls, and the entire system is replayable from a seed. Inspired
@@ -71,7 +87,7 @@ test harness, and Antithesis.
 
 The bar:
 
-- All time is injected. Already true at the `bouncer-honker` core
+- All time is injected. Already true at the `bouncer-core` core
   (`now_ms` parameter on every function). The wrapper layer must
   preserve this — production callers see a `Clock` default, tests see
   whatever the harness wants.
@@ -95,7 +111,7 @@ What lives where:
 
 - honker hosts the simulation harness (clock seam, op generator,
   scheduler, VFS shim, property runner) so siblings inherit it.
-- Each sibling (bouncer-honker, future queue/retry/scheduler) provides
+- Each sibling (bouncer-core, future queue/retry/scheduler) provides
   its own operation generator and invariant set.
 - Production code stays unchanged. DST is a test-time superpower, not
   a runtime cost.

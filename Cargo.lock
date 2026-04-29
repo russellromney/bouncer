@@ -18,7 +18,16 @@ checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 name = "bouncer"
 version = "0.1.0"
 dependencies = [
- "bouncer-honker",
+ "bouncer-core",
+ "rusqlite",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "bouncer-core"
+version = "0.1.0"
+dependencies = [
  "rusqlite",
  "tempfile",
  "thiserror",
@@ -28,17 +37,8 @@ dependencies = [
 name = "bouncer-extension"
 version = "0.1.0"
 dependencies = [
- "bouncer-honker",
+ "bouncer-core",
  "rusqlite",
-]
-
-[[package]]
-name = "bouncer-honker"
-version = "0.1.0"
-dependencies = [
- "rusqlite",
- "tempfile",
- "thiserror",
 ]
 
 [[package]]

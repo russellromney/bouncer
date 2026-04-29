@@ -1,8 +1,8 @@
 [package]
-name = "bouncer-honker"
+name = "bouncer-core"
 version = "0.1.0"
 edition = "2021"
-description = "Rust core for Bouncer, a lease and coordination library on top of Honker."
+description = "Rust core for Bouncer, a SQLite lease and coordination library."
 license = "MIT"
 
 [dependencies]

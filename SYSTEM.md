@@ -9,10 +9,10 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
   - `ROADMAP.md`
   - `CHANGELOG.md`
   - this `SYSTEM.md`
-  - a real `bouncer-honker` crate
+  - a real `bouncer-core` crate
 - a real `packages/bouncer` Rust wrapper crate
-- `bouncer-honker` installs a `bouncer_resources` table.
-- `bouncer-honker` exposes Rust helpers for `inspect`, `claim`, `renew`, and `release`.
+- `bouncer-core` installs a `bouncer_resources` table.
+- `bouncer-core` exposes Rust helpers for `inspect`, `claim`, `renew`, and `release`.
 - A resource row persists after its first successful claim so the fencing token can stay monotonic across expiry, release, and re-claim.
 - `inspect(name, now_ms)` answers whether there is a live lease right now; expired or released rows do not count as owned.
 - `renew` succeeds only for the current live owner.
@@ -25,7 +25,7 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
   boundary on that wrapper-owned transaction.
 - The wrapper requires explicit `bootstrap()` and does not silently create schema state in `open(path)`.
 - Wrapper convenience methods use system time for lease expiry bookkeeping only.
-- `bouncer-honker` now exposes both transaction-owning Rust helpers
+- `bouncer-core` now exposes both transaction-owning Rust helpers
   (`claim`, `renew`, `release`) and caller-owned transaction helpers
   (`claim_in_tx`, `renew_in_tx`, `release_in_tx`).
 - The public `*_in_tx` helpers fail fast with `Error::NotInTransaction`
@@ -64,7 +64,7 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
   surface; wrapper tests live in split test modules.
 - Contention semantics are still primarily proven at the core layer; the wrapper proves thin delegation, interop, and borrowed transaction participation rather than a new concurrency model.
 - a real `bouncer-extension` loadable-extension crate exists in the workspace.
-- `bouncer-honker` now also owns the first `bouncer_*` SQL function registration surface via `attach_bouncer_functions`.
+- `bouncer-core` now also owns the first `bouncer_*` SQL function registration surface via `attach_bouncer_functions`.
 - The current SQL surface is:
   - `bouncer_bootstrap()`
   - `bouncer_claim(name, owner, ttl_ms, now_ms)`

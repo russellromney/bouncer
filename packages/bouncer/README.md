@@ -1,10 +1,10 @@
 # bouncer package
 
-Thin Rust binding for `bouncer-honker`.
+Thin Rust binding for `bouncer-core`.
 
 This crate is the friendly wrapper layer:
 
-- `bouncer-honker` keeps the explicit-time core contract
+- `bouncer-core` keeps the explicit-time core contract
 - `bouncer` opens a SQLite database, bootstraps the schema explicitly,
   and exposes the four lease verbs with normal `Duration` inputs
 
@@ -102,5 +102,5 @@ tx.commit()?;
 ```
 
 If you need deterministic time control for tests or simulation work,
-drop down to `bouncer-honker`, where the core contract still takes
+drop down to `bouncer-core`, where the core contract still takes
 explicit `now_ms` / `ttl_ms` values.

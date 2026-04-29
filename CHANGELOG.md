@@ -138,3 +138,13 @@ Changed:
   stays small and tests live in dedicated modules
 - wrapper semantic-stress tests now use deterministic explicit-time
   core helpers instead of sleeping for expiry
+
+### Phase 008 — core crate rename
+
+Changed:
+
+- renamed the Rust core crate and directory from `bouncer-honker` to
+  `bouncer-core`
+- updated current docs, dependency declarations, and imports so Honker
+  can eventually depend on Bouncer without the dependency direction
+  reading backwards

@@ -16,7 +16,7 @@ uses.
 It should feel like a sibling to Knocker:
 
 - `honker` stays the generic SQLite async substrate
-- `bouncer-honker` owns Bouncer's schema and SQLite operations
+- `bouncer-core` owns Bouncer's schema and SQLite operations
 - `bouncer` bindings stay thin and simple
 
 Bouncer should be the family's lease / fencing / leader-election
@@ -26,7 +26,7 @@ ownership and other single-machine coordination.
 ## What exists today
 
 - repo-level docs for current intent and future direction
-- a real Phase 001 `bouncer-honker` core crate
+- a real `bouncer-core` crate
 - a first Rust wrapper crate in `packages/bouncer`
 - a first SQLite loadable-extension crate in `bouncer-extension`
 - a SQLite schema bootstrap plus Rust `claim` / `renew` / `release` / `inspect`
@@ -103,7 +103,7 @@ small internal primitive rather than grow into a bigger product.
 
 ## Repo shape
 
-- `bouncer-honker`
+- `bouncer-core`
   Rust core that owns schema and SQLite operations
 - `bouncer-extension`
   SQLite loadable extension / shared SQL surface

@@ -1,6 +1,6 @@
 //! Bouncer SQLite loadable extension.
 //!
-//! Thin wrapper around `bouncer-honker`. Registers the first
+//! Thin wrapper around `bouncer-core`. Registers the first
 //! `bouncer_*` SQL scalar functions so any SQLite client can answer:
 //! "who owns this named resource right now?"
 
@@ -23,7 +23,7 @@ pub unsafe extern "C" fn sqlite3_bouncerext_init(
 ) -> c_int {
     unsafe {
         Connection::extension_init2(db, pz_err_msg, p_api, |conn| {
-            bouncer_honker::attach_bouncer_functions(&conn)?;
+            bouncer_core::attach_bouncer_functions(&conn)?;
             Ok(true)
         })
     }

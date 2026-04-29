@@ -2,11 +2,11 @@
 name = "bouncer"
 version = "0.1.0"
 edition = "2021"
-description = "Thin Rust binding for Bouncer, a lease and coordination library on top of Honker."
+description = "Thin Rust binding for Bouncer, a SQLite lease and coordination library."
 license = "MIT"
 
 [dependencies]
-bouncer-honker = { path = "../../bouncer-honker" }
+bouncer-core = { path = "../../bouncer-core" }
 rusqlite = "0.39.0"
 thiserror = "2.0.17"
 
