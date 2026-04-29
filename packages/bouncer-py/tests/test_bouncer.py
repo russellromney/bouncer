@@ -251,7 +251,8 @@ def test_overlapping_transactions_fail_loudly(tmp_path: Path) -> None:
 
     with db.transaction():
         with pytest.raises(bouncer.BouncerError, match="transaction is active"):
-            db.transaction()
+            with db.transaction():
+                pass
 
 
 def test_errors_map_to_bouncer_error(tmp_path: Path) -> None:
@@ -286,6 +287,52 @@ def test_transaction_execute_rejects_multiple_statements(tmp_path: Path) -> None
             )
 
     assert business_count(path) == 0
+
+
+def test_transaction_without_enter_raises(tmp_path: Path) -> None:
+    db = bouncer.open(tmp_path / "app.sqlite3")
+    db.bootstrap()
+
+    tx = db.transaction()
+
+    with pytest.raises(bouncer.BouncerError, match="not been entered"):
+        tx.claim("scheduler", "worker-a", ttl_ms=30_000)
+    with pytest.raises(bouncer.BouncerError, match="not been entered"):
+        tx.inspect("scheduler")
+    with pytest.raises(bouncer.BouncerError, match="not been entered"):
+        tx.commit()
+
+
+def test_transaction_without_enter_does_not_lock_database(tmp_path: Path) -> None:
+    path = tmp_path / "app.sqlite3"
+    db = bouncer.open(path)
+    db.bootstrap()
+
+    tx = db.transaction()
+
+    other = sqlite3.connect(path, timeout=0.5)
+    try:
+        other.execute("CREATE TABLE other_writes (id INTEGER PRIMARY KEY)")
+        other.commit()
+    finally:
+        other.close()
+
+    with tx:
+        claim = tx.claim("scheduler", "worker-a", ttl_ms=30_000)
+    assert claim.acquired
+
+
+def test_transaction_is_single_use(tmp_path: Path) -> None:
+    db = bouncer.open(tmp_path / "app.sqlite3")
+    db.bootstrap()
+
+    tx = db.transaction()
+    with tx:
+        pass
+
+    with pytest.raises(bouncer.BouncerError, match="already finished|already entered"):
+        with tx:
+            pass
 
 
 def test_transaction_execute_binds_positional_parameters(tmp_path: Path) -> None:

@@ -48,6 +48,16 @@ The repo now has a real Phase 001 Rust core:
   commit and roll back together
 - Python cross-surface tests prove the binding and SQLite extension share
   one database-file contract
+- the Python `Transaction` is honestly context-manager-first;
+  `BEGIN IMMEDIATE` opens inside `__enter__`, the `Transaction` is
+  single-use, and pre-`__enter__` verb calls fail loudly
+- `Transaction.__del__` is gone; the native `Drop for NativeBouncer` is
+  the only remaining transaction safety net
+- `bouncer-py`'s Rust edition matches its in-repo siblings (2021)
+- the package and root READMEs now document the three caller surfaces
+  (SQL extension, Python binding, Rust wrapper) and tell
+  `sqlite3.Connection`-owning Python callers to use the SQL extension
+  path
 
 The intended model is:
 
@@ -62,18 +72,9 @@ The intended model is:
 
 ## Next build steps
 
-1. Review and harden the Python binding against first-user ergonomics:
-   docs, packaging shape, and whether caller-owned Python
-   `sqlite3.Connection` users should be served through extension docs
-   rather than a new binding surface.
-2. Clean up two post-Phase-009 implementation notes when the next
-   Python-binding phase touches this area: decide whether to remove the
-   redundant Python `Transaction.__del__` safety net, and align the
-   `bouncer-py` Rust edition with the rest of the family if that is the
-   intended standard.
-3. Start the Honker integration phase once Bouncer's Python baseline has
-   survived review: Honker scheduler/coordination leases should depend
-   on Bouncer rather than carrying a parallel lease primitive.
+1. Start the Honker integration phase: Honker scheduler / coordination
+   leases should depend on Bouncer rather than carrying a parallel
+   lease primitive.
 
 ## Future proposals
 

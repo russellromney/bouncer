@@ -77,6 +77,15 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
 - The supported Python V1 transaction shape is the `with` block; direct
   non-context-manager transaction use is not part of the documented
   contract.
+- `Bouncer.transaction()` no longer eagerly opens `BEGIN IMMEDIATE`.
+  The transaction opens inside `Transaction.__enter__` and `Transaction`
+  is single-use; entering twice or entering after explicit
+  `commit`/`rollback` raises `BouncerError`. Pre-`__enter__` verb
+  calls raise `BouncerError` with a message pointing at
+  `with db.transaction() as tx:`.
+- The Python `Transaction` has no `__del__` safety net; native handle
+  teardown is the only safety path for orphaned
+  `transaction_active = True`.
 - While a Python transaction is active, top-level lease operations on
   that handle fail loudly; callers use the transaction handle until it
   commits or rolls back.

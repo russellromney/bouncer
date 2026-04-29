@@ -39,6 +39,27 @@ raise `BouncerError` until the transaction finishes.
 positional parameters through SQLite and raises `BouncerError` for SQL
 syntax errors or multi-statement strings.
 
+## Already own a `sqlite3.Connection`?
+
+The Python binding owns its own SQLite connection in V1; it does not
+participate in a connection your code already manages. If you already
+have a `sqlite3.Connection` (or any other Python SQLite client), use
+the `bouncer-extension` SQL loadable extension instead:
+
+```python
+import sqlite3
+
+conn = sqlite3.connect("app.sqlite3")
+conn.enable_load_extension(True)
+conn.load_extension("path/to/libbouncer_ext")  # .dylib / .so / .dll
+conn.execute("SELECT bouncer_bootstrap()")
+```
+
+After `bouncer_bootstrap()`, call `bouncer_claim`, `bouncer_renew`,
+`bouncer_release`, `bouncer_owner`, and `bouncer_token` directly as SQL
+functions. The SQL surface keeps `now_ms` explicit; pass current
+milliseconds-since-epoch.
+
 Build and test from the repo root:
 
 ```bash

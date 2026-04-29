@@ -1,4 +1,4 @@
-from bouncer._bouncer import Bouncer, BouncerError, Transaction, open
+from bouncer._bouncer import Bouncer, BouncerError, open
 from bouncer.models import ClaimResult, LeaseInfo, ReleaseResult, RenewResult
 
 __all__ = [
@@ -8,6 +8,5 @@ __all__ = [
     "LeaseInfo",
     "ReleaseResult",
     "RenewResult",
-    "Transaction",
     "open",
 ]

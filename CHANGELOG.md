@@ -177,3 +177,41 @@ Clarified:
   `sqlite3.Connection` transactions
 - Python `tx.execute` is a single-statement helper and raises
   `BouncerError` for SQL syntax errors or multi-statement input
+
+### Phase 010 — Python binding hardening
+
+Changed:
+
+- `Bouncer.transaction()` no longer eagerly opens `BEGIN IMMEDIATE`;
+  the transaction opens inside `Transaction.__enter__`
+- `Transaction` is single-use and context-manager-first; `__enter__`
+  raises `BouncerError` if the transaction is already entered or
+  finished, and pre-`__enter__` verb calls raise with a message
+  pointing at `with db.transaction() as tx:`
+- if `begin_transaction` fails inside `__enter__`, the `Transaction`
+  remains unentered so the same instance can be re-entered after the
+  contention clears
+- `Transaction.__del__` is removed; the native
+  `Drop for NativeBouncer` is the only remaining transaction safety
+  net
+- `Transaction` is no longer exported from `bouncer.__all__`; users
+  reach it only through `db.transaction()`
+- `packages/bouncer-py/Cargo.toml` aligns to Rust edition `2021`,
+  matching `bouncer-core` and `bouncer-extension`
+
+Added:
+
+- direct Python tests for `tx.inspect`, `tx.renew`, and `tx.release`
+  inside an active transaction
+- Python tests pinning the entered / unentered / single-use contract
+  on `Transaction` and proving that an unentered `Transaction` does
+  not hold a SQLite write lock
+- `BouncerError` covers non-lease native errors (a SQL syntax error
+  in `tx.execute` raises `BouncerError`)
+- a regression test pinning the rusqlite multi-statement reject
+  behavior of `tx.execute`
+- `packages/bouncer-py/README.md` section directing callers who own
+  a stdlib `sqlite3.Connection` at the SQL extension path, with a
+  working `enable_load_extension` snippet
+- root `README.md` "Choosing a surface" section showing SQL
+  extension, Python binding, and Rust wrapper side by side

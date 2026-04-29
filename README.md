@@ -71,6 +71,44 @@ Mutating SQL helpers can also participate in a caller-owned explicit
 transaction, so a business write and a Bouncer lease mutation can commit
 or roll back together on one connection.
 
+## Choosing a surface
+
+Three caller surfaces share one Bouncer-owned schema and lease
+semantics. Pick the one that matches how you already use SQLite. All
+three operate on the same `bouncer_resources` table and can coexist on
+one database file.
+
+**SQL extension** — for any SQLite client that wants Bouncer
+semantics on a connection it already owns. Load
+`libbouncer_ext.{dylib,so,dll}` and call the `bouncer_*` SQL functions:
+
+```sql
+SELECT bouncer_bootstrap();
+SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
+SELECT bouncer_owner('scheduler', 1700000000000);
+```
+
+**Python binding** — for Python callers who want a typed,
+binding-owned SQLite connection:
+
+```python
+import bouncer
+db = bouncer.open("app.sqlite3")
+db.bootstrap()
+result = db.claim("scheduler", "worker-a", ttl_ms=30_000)
+```
+
+**Rust wrapper** — for Rust callers, with a sanctioned transaction
+handle and savepoint surface:
+
+```rust
+let mut db = bouncer::Bouncer::open("app.sqlite3")?;
+db.bootstrap()?;
+let tx = db.transaction()?;
+tx.claim("scheduler", "worker-a", Duration::from_secs(30))?;
+tx.commit()?;
+```
+
 ## Non-goals
 
 - distributed consensus
