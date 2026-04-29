@@ -322,6 +322,27 @@ def test_transaction_without_enter_does_not_lock_database(tmp_path: Path) -> Non
     assert claim.acquired
 
 
+def test_transaction_begin_failure_can_reenter_same_instance(tmp_path: Path) -> None:
+    path = tmp_path / "app.sqlite3"
+    db = bouncer.open(path)
+    db.bootstrap()
+
+    blocker = sqlite3.connect(path, timeout=0.5)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        tx = db.transaction()
+        with pytest.raises(bouncer.BouncerError, match="locked|busy"):
+            tx.__enter__()
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    with tx:
+        claim = tx.claim("scheduler", "worker-a", ttl_ms=30_000)
+
+    assert claim.acquired
+
+
 def test_transaction_is_single_use(tmp_path: Path) -> None:
     db = bouncer.open(tmp_path / "app.sqlite3")
     db.bootstrap()

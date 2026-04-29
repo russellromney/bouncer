@@ -335,8 +335,8 @@ Recommended next step: a Decision Round 002 that resolves
     (SQL syntax error in `tx.execute` raises `BouncerError`)
   - the `tx.execute` single-statement contract pin: a one-line
     `packages/bouncer-py/README.md` note plus a regression test
-    that documents the current rusqlite silent-drop behavior
-    when given multi-statement SQL
+    that documents the current rusqlite rejection behavior when
+    given multi-statement SQL
 
   The two larger items (`bouncer-extension` first-class Rust
   integration test and cross-binding parity) stay deferred to
@@ -359,3 +359,73 @@ Recommended next step: a Decision Round 002 that resolves
 
 Phase 010 implementation can proceed. After implementation,
 record the SHA in `commits.txt` and close the phase.
+
+## Review Round 002
+
+### Reviewing
+
+- Phase 010 implementation in `95f7aa4`
+- commit trace `5cd946c`
+- focus areas: artifact honesty, context-manager-first transaction
+  behavior, and verification coverage
+
+### Findings
+
+- [F10] **Spec-diff still says multi-statement SQL is silently
+  dropped.** The implementation, package README, changelog, and tests
+  correctly pin `tx.execute` as rejecting multi-statement SQL with
+  `BouncerError` / `Multiple statements provided`. The spec-diff still
+  says trailing statements are silently dropped.
+
+- [F11] **Spec-diff describes orphaned manual-enter failure at the
+  wrong call boundary.** After `tx.__enter__()` without `with` and GC
+  of the `Transaction`, `db.transaction()` itself still succeeds
+  because it is side-effect-free. The failure happens on the next
+  `Transaction.__enter__` or top-level lease operation.
+
+- [F12] **Begin-failure re-entry contract lacks direct coverage.**
+  The implementation sets `_entered = True` only after
+  `begin_transaction` succeeds, matching `[D13]`, but there is no test
+  proving the same `Transaction` can be re-entered after writer
+  contention clears.
+
+### Verdict
+
+All three findings are real. `[F10]` and `[F11]` are artifact honesty
+fixes. `[F12]` is a small missing regression test.
+
+## Decision Round 003
+
+### Responding to
+
+- Review Round 002 `[F10]` through `[F12]`
+- human confirmation that these are the kind of slow-drift issues the
+  workflow is supposed to catch
+
+### Decisions
+
+- [D17] Accept `[F10]`. Update `spec-diff.md` and `plan.md` so
+  multi-statement SQL is described as rejected by rusqlite and surfaced
+  as `BouncerError`, not silently dropped.
+  Target:
+  - `spec-diff.md`
+  - `plan.md`
+
+- [D18] Accept `[F11]`. Update `spec-diff.md` so orphaned manual-enter
+  behavior is described at the correct boundary: `db.transaction()`
+  can still construct a new unentered transaction object, while
+  `Transaction.__enter__` and top-level lease operations fail until the
+  native transaction state is cleared or the `Bouncer` is dropped.
+  Target:
+  - `spec-diff.md`
+
+- [D19] Accept `[F12]`. Add a direct Python test where a second
+  connection holds a writer lock, `tx.__enter__()` fails, the lock is
+  released, and the same `Transaction` instance enters successfully.
+  Target:
+  - `packages/bouncer-py/tests/test_bouncer.py`
+
+### Verdict
+
+Patch the artifacts and add the missing test, then rerun the Python
+tests and `make test`.

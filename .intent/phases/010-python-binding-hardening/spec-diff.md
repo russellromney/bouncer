@@ -22,9 +22,11 @@ What changes:
   Documented behavior change: a user who manually calls `tx.__enter__()`
   outside a `with` block and GCs the `Transaction` without
   `commit()` or `rollback()` leaks `transaction_active = True` on the
-  native handle until the underlying `Bouncer` is also dropped. The
-  next `db.transaction()` on that `Bouncer` raises `BouncerError`.
-  Honest fail-loud, not silent fix.
+  native handle until the underlying `Bouncer` is also dropped. A fresh
+  `db.transaction()` can still construct a new unentered transaction
+  object, because construction is side-effect-free; the next
+  `Transaction.__enter__` or top-level lease operation on that
+  `Bouncer` raises `BouncerError`. Honest fail-loud, not silent fix.
 - `Transaction` is removed from `bouncer.__all__` and from the public
   re-export in `bouncer/__init__.py`. Users reach `Transaction` only
   through `db.transaction()`. The class name stays `Transaction`.
@@ -37,8 +39,8 @@ What changes:
   (`sqlite3.connect → enable_load_extension → load_extension →
   SELECT bouncer_bootstrap()`).
 - The Python package README adds a one-line note that `tx.execute`
-  runs a single SQL statement; multi-statement strings have the
-  trailing statements silently dropped (rusqlite/SQLite behavior).
+  runs a single SQL statement; multi-statement strings are rejected
+  by rusqlite and surfaced as `BouncerError`.
 - The root `README.md` adds one short example block that shows the
   three caller surfaces side by side: SQL extension for SQL-only
   callers, Python binding for typed Python callers, Rust wrapper for
@@ -49,8 +51,7 @@ What changes:
 - A new test pins that `BouncerError` covers non-lease native errors:
   a SQL syntax error in `tx.execute` raises `BouncerError`.
 - A new regression test pins the current `tx.execute` single-statement
-  silent-drop behavior so future changes notice if the contract
-  shifts.
+  rejection behavior so future changes notice if the contract shifts.
 
 What does not change:
 

@@ -155,8 +155,11 @@ Keep it tight: one snippet per surface, no full lease cycle.
      happy-path test for `tx.release`.
    - `test_bouncer_error_covers_non_lease_errors` — a SQL syntax
      error in `tx.execute` raises `BouncerError`.
-   - `test_tx_execute_runs_only_first_statement` — regression
-     test for the rusqlite single-statement silent-drop behavior.
+   - `test_transaction_begin_failure_can_reenter_same_instance` —
+     a failed `__enter__` leaves `_entered = False` and allows the
+     same `Transaction` to enter after contention clears.
+   - `test_tx_execute_rejects_multiple_statements` — regression
+     test for the rusqlite single-statement rejection behavior.
 6. Update `packages/bouncer-py/Cargo.toml` edition to `2021`.
 7. Update `packages/bouncer-py/README.md`:
    - add a "Python `sqlite3.Connection` users" section with a
