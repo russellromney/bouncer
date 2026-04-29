@@ -31,6 +31,16 @@ The repo now has a real Phase 001 Rust core:
 - the core now exposes explicit public `*_in_tx` helpers with a fail-fast transaction-state guard
 - the wrapper now exposes a sanctioned `Bouncer::transaction()` handle
   with checked `BEGIN IMMEDIATE` semantics and same-wrapper exclusivity
+- the wrapper transaction handle now exposes a sanctioned `savepoint()`
+  nested boundary with tested claim/renew/release/inspect behavior
+- wrapper transaction and savepoint commits are now proven visible from
+  fresh connections after the outer transaction commits
+- wrapper semantic-stress tests now use explicit-time core helpers
+  instead of sleep-based expiry waits where practical
+- `packages/bouncer/src/lib.rs` has been split so the public wrapper
+  surface stays small and the test modules carry the test bulk
+- wrapper and system docs now name the recommended default surfaces:
+  `Bouncer`, `Bouncer::transaction()`, and `BouncerRef`
 
 The intended model is:
 
@@ -45,10 +55,7 @@ The intended model is:
 
 ## Next build steps
 
-1. Do one focused hardening pass on the settled core surfaces:
-   savepoint surface, cross-connection durability proof, fragile timing
-   tests, file-size cleanup, and clearer default-surface docs.
-2. Prove the shape with one non-Rust binding, preferably Python, before
+1. Prove the shape with one non-Rust binding, preferably Python, before
    moving on to broader docs/examples or more bindings.
 
 ## Future proposals

@@ -19,6 +19,19 @@ If the caller already owns a transaction or savepoint on a borrowed
 `rusqlite::Connection`, `BouncerRef` mutators participate in that
 existing boundary instead of attempting a nested transaction.
 
+Recommended default surfaces:
+
+- `Bouncer`
+  Use for simple autocommit lease operations on one wrapper-owned
+  connection.
+- `Bouncer::transaction()`
+  Use when a business write and one or more lease mutations should live
+  in one sanctioned `BEGIN IMMEDIATE` boundary.
+- `BouncerRef`
+  Use when the caller already owns the SQLite connection or its current
+  transaction/savepoint state and wants Bouncer to participate honestly
+  in that lower-level boundary.
+
 Example:
 
 ```rust
@@ -75,6 +88,18 @@ match tx.claim("scheduler", "worker-a", Duration::from_secs(30))? {
 statements and business writes inside the same atomic boundary. Don't
 issue `BEGIN` / `COMMIT` / `ROLLBACK` through it — call the handle's
 `commit()` / `rollback()` (or drop the handle to roll back).
+
+If you need a nested boundary inside that transaction, open a wrapper
+savepoint from the handle:
+
+```rust
+let mut tx = db.transaction()?;
+let sp = tx.savepoint()?;
+// lease mutations and business writes through `sp`
+sp.commit()?;
+tx.commit()?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 If you need deterministic time control for tests or simulation work,
 drop down to `bouncer-honker`, where the core contract still takes

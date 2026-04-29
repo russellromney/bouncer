@@ -21,6 +21,8 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
 - `packages/bouncer` exposes an owned `Bouncer` wrapper and a borrowed `BouncerRef<'a>`.
 - `packages/bouncer` now also exposes a sanctioned wrapper-owned
   `Transaction<'db>` handle via `Bouncer::transaction()`.
+- `Transaction<'db>` exposes `savepoint()` for a sanctioned nested
+  boundary on that wrapper-owned transaction.
 - The wrapper requires explicit `bootstrap()` and does not silently create schema state in `open(path)`.
 - Wrapper convenience methods use system time for lease expiry bookkeeping only.
 - `bouncer-honker` now exposes both transaction-owning Rust helpers
@@ -41,11 +43,25 @@ Bouncer is a single-machine lease and ownership primitive for the Honker family.
   from overlapping the open transaction on that connection.
 - The wrapper transaction handle exposes `inspect`, `claim`, `renew`,
   `release`, `conn()`, `commit()`, and `rollback()`.
+- The wrapper savepoint handle exposes `inspect`, `claim`, `renew`,
+  `release`, `conn()`, `commit()`, and terminal consuming
+  `rollback()`.
+- The recommended wrapper default is `Bouncer` for simple autocommit
+  lease operations, `Bouncer::transaction()` when business writes and
+  lease mutations must commit or roll back together, and `BouncerRef`
+  when the caller owns the SQLite connection or current
+  transaction/savepoint state.
 - Wrapper tests now also prove borrowed-path commit/rollback,
   multi-mutator transactions, semantic-stress behavior, and savepoint
   participation on the same database file.
 - Wrapper tests now also prove transaction-handle commit/rollback,
   direct `inspect` and `renew`, drop-rollback, and semantic parity.
+- Wrapper tests now prove transaction and savepoint durability from a
+  fresh connection, savepoint renew/release coverage, savepoint commit
+  plus outer rollback behavior, and deterministic explicit-time
+  semantic stress instead of sleep-based expiry waits.
+- `packages/bouncer/src/lib.rs` stays focused on the public wrapper
+  surface; wrapper tests live in split test modules.
 - Contention semantics are still primarily proven at the core layer; the wrapper proves thin delegation, interop, and borrowed transaction participation rather than a new concurrency model.
 - a real `bouncer-extension` loadable-extension crate exists in the workspace.
 - `bouncer-honker` now also owns the first `bouncer_*` SQL function registration surface via `attach_bouncer_functions`.

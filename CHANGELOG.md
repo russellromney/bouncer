@@ -117,3 +117,24 @@ Changed:
 - same-wrapper autocommit calls and a second wrapper-owned transaction
   can no longer overlap the open transaction through this sanctioned
   wrapper path
+
+### Phase 007 — core hardening
+
+Added:
+
+- sanctioned `Transaction::savepoint()` wrapper surface with
+  `Savepoint<'db>` handle methods for `inspect`, `claim`, `renew`,
+  `release`, `conn()`, `commit()`, and terminal `rollback()`
+- wrapper tests for savepoint rollback, savepoint commit, direct
+  savepoint `renew`, direct savepoint `release`, savepoint commit plus
+  outer rollback, and savepoint durability from a fresh connection
+- fresh-connection durability proof for the wrapper transaction handle
+- recommended-default documentation for `Bouncer`,
+  `Bouncer::transaction()`, and `BouncerRef`
+
+Changed:
+
+- `packages/bouncer/src/lib.rs` is split so the public wrapper surface
+  stays small and tests live in dedicated modules
+- wrapper semantic-stress tests now use deterministic explicit-time
+  core helpers instead of sleeping for expiry
