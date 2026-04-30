@@ -1,0 +1,21 @@
+# Commits
+
+Phase: 013 — schema and data-integrity hardening
+
+## Commits
+
+- `5849cb9` — Land Phase 013 schema and data-integrity hardening
+
+## Evidence
+
+- `cargo test -p bouncer-core --test integrity`
+- `cargo test -p bouncer-core`
+- `cargo test -p bouncer`
+- `make test-rust`
+- `make test-python`
+
+## Notes
+
+- This landing commit includes the core hardening implementation, the
+  dedicated integrity suite, the accepted review trail, and the
+  baseline doc closeout updates.

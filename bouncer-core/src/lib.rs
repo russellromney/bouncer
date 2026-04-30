@@ -11,8 +11,6 @@
 use rusqlite::functions::FunctionFlags;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-pub const BOUNCER_SCHEMA_VERSION: &str = "1";
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(thiserror::Error, Debug)]
@@ -29,6 +27,8 @@ pub enum Error {
     TokenOverflow(String),
     #[error("invalid lease row for resource `{0}`")]
     InvalidLeaseRow(String),
+    #[error("bouncer_resources schema mismatch: {reason}")]
+    SchemaMismatch { reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,10 +98,10 @@ impl ResourceRow {
     }
 }
 
-/// Install Bouncer's Phase 001 schema on `conn`. Idempotent.
-pub fn bootstrap_bouncer_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS bouncer_resources (
+/// Canonical CREATE TABLE statement for `bouncer_resources`. Used both to
+/// install a fresh schema and as the reference shape for validating an
+/// existing one.
+const BOUNCER_RESOURCES_DDL: &str = "CREATE TABLE bouncer_resources (
            name TEXT PRIMARY KEY,
            owner TEXT,
            token INTEGER NOT NULL CHECK (token >= 1),
@@ -112,10 +112,215 @@ pub fn bootstrap_bouncer_schema(conn: &Connection) -> Result<()> {
              (owner IS NULL AND lease_expires_at_ms IS NULL)
              OR (owner IS NOT NULL AND lease_expires_at_ms IS NOT NULL)
            )
-         );",
+         )";
+
+struct ExpectedColumn {
+    cid: i64,
+    name: &'static str,
+    decl_type: &'static str,
+    notnull: bool,
+    pk: i64,
+}
+
+const EXPECTED_COLUMNS: &[ExpectedColumn] = &[
+    ExpectedColumn {
+        cid: 0,
+        name: "name",
+        decl_type: "TEXT",
+        notnull: false,
+        pk: 1,
+    },
+    ExpectedColumn {
+        cid: 1,
+        name: "owner",
+        decl_type: "TEXT",
+        notnull: false,
+        pk: 0,
+    },
+    ExpectedColumn {
+        cid: 2,
+        name: "token",
+        decl_type: "INTEGER",
+        notnull: true,
+        pk: 0,
+    },
+    ExpectedColumn {
+        cid: 3,
+        name: "lease_expires_at_ms",
+        decl_type: "INTEGER",
+        notnull: false,
+        pk: 0,
+    },
+    ExpectedColumn {
+        cid: 4,
+        name: "created_at_ms",
+        decl_type: "INTEGER",
+        notnull: true,
+        pk: 0,
+    },
+    ExpectedColumn {
+        cid: 5,
+        name: "updated_at_ms",
+        decl_type: "INTEGER",
+        notnull: true,
+        pk: 0,
+    },
+];
+
+/// Required CHECK constraints, expressed as the canonical fragments expected
+/// to appear in the table's stored `sqlite_master.sql` text after whitespace
+/// normalization. The exact reason text is diagnostic, not a stable contract.
+const EXPECTED_TOKEN_CHECK: &str = "CHECK (token >= 1)";
+const EXPECTED_PAIR_CHECK: &str = "CHECK ( (owner IS NULL AND lease_expires_at_ms IS NULL) OR (owner IS NOT NULL AND lease_expires_at_ms IS NOT NULL) )";
+
+/// Install Bouncer's schema on `conn`, or validate it strictly if a
+/// `bouncer_resources` table already exists.
+///
+/// On a fresh database the canonical schema is created. On a database that
+/// already has a `bouncer_resources` table, the existing table is validated
+/// against the proved schema: exact six columns in order, declared types
+/// (no affinity tolerance), required nullability, primary-key position on
+/// `name`, and the two load-bearing CHECK constraints.
+///
+/// Calling this on a database whose schema already matches the proved shape
+/// is an idempotent no-op success and does not touch existing rows. Schema
+/// validation is read-only and does not pollute caller transaction state, so
+/// bootstrap may be called inside or outside a caller-owned transaction.
+pub fn bootstrap_bouncer_schema(conn: &Connection) -> Result<()> {
+    if bouncer_resources_table_exists(conn)? {
+        validate_existing_schema(conn)?;
+    } else {
+        conn.execute_batch(BOUNCER_RESOURCES_DDL)?;
+    }
+    Ok(())
+}
+
+fn bouncer_resources_table_exists(conn: &Connection) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' AND name = 'bouncer_resources'",
+        [],
+        |row| row.get(0),
     )?;
+    Ok(count > 0)
+}
+
+fn validate_existing_schema(conn: &Connection) -> Result<()> {
+    validate_columns(conn)?;
+    validate_table_checks(conn)?;
+    Ok(())
+}
+
+fn validate_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "SELECT cid, name, type, [notnull], pk \
+         FROM pragma_table_info('bouncer_resources') \
+         ORDER BY cid",
+    )?;
+    let rows: Vec<(i64, String, String, bool, i64)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    if rows.len() != EXPECTED_COLUMNS.len() {
+        return Err(Error::SchemaMismatch {
+            reason: format!(
+                "expected {} columns, found {}",
+                EXPECTED_COLUMNS.len(),
+                rows.len()
+            ),
+        });
+    }
+
+    for (idx, expected) in EXPECTED_COLUMNS.iter().enumerate() {
+        let (cid, name, decl_type, notnull, pk) = &rows[idx];
+
+        if *cid != expected.cid {
+            return Err(Error::SchemaMismatch {
+                reason: format!(
+                    "column at position {idx} has cid {cid}, expected {}",
+                    expected.cid
+                ),
+            });
+        }
+        if name != expected.name {
+            return Err(Error::SchemaMismatch {
+                reason: format!(
+                    "expected column `{}` at position {idx}, found `{name}`",
+                    expected.name
+                ),
+            });
+        }
+        if decl_type != expected.decl_type {
+            return Err(Error::SchemaMismatch {
+                reason: format!(
+                    "column `{}` declared type mismatch: expected `{}`, found `{decl_type}`",
+                    expected.name, expected.decl_type
+                ),
+            });
+        }
+        if *notnull != expected.notnull {
+            return Err(Error::SchemaMismatch {
+                reason: format!(
+                    "column `{}` NOT NULL mismatch: expected {}, found {notnull}",
+                    expected.name, expected.notnull
+                ),
+            });
+        }
+        if *pk != expected.pk {
+            return Err(Error::SchemaMismatch {
+                reason: format!(
+                    "column `{}` primary-key position mismatch: expected {}, found {pk}",
+                    expected.name, expected.pk
+                ),
+            });
+        }
+    }
 
     Ok(())
+}
+
+fn validate_table_checks(conn: &Connection) -> Result<()> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master \
+             WHERE type = 'table' AND name = 'bouncer_resources'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let sql = sql.ok_or_else(|| Error::SchemaMismatch {
+        reason: "bouncer_resources has no stored CREATE TABLE text".to_owned(),
+    })?;
+
+    let normalized = normalize_sql(&sql);
+    let token_check = normalize_sql(EXPECTED_TOKEN_CHECK);
+    let pair_check = normalize_sql(EXPECTED_PAIR_CHECK);
+
+    if !normalized.contains(&token_check) {
+        return Err(Error::SchemaMismatch {
+            reason: format!("missing CHECK constraint `{token_check}`"),
+        });
+    }
+    if !normalized.contains(&pair_check) {
+        return Err(Error::SchemaMismatch {
+            reason: format!("missing CHECK constraint `{pair_check}`"),
+        });
+    }
+
+    Ok(())
+}
+
+fn normalize_sql(sql: &str) -> String {
+    sql.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Return the live lease for `name` at `now_ms`, if one exists.

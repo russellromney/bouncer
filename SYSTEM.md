@@ -36,6 +36,25 @@ transaction and open `BEGIN IMMEDIATE`. `claim_in_tx`, `renew_in_tx`, and
 `release_in_tx` reuse a caller-owned transaction or savepoint and fail fast with
 `Error::NotInTransaction` when called on an autocommit connection.
 
+`bootstrap_bouncer_schema(conn)` now has a strict persisted-schema contract.
+On a fresh database it creates `bouncer_resources`. On an existing database it
+validates the current table shape and fails loudly with
+`Error::SchemaMismatch { reason }` if the table has drifted from the proved
+schema. The current contract is exact six-column shape, column order, declared
+type text, required nullability, primary-key position on `name`, and the two
+load-bearing invariants:
+
+- `token >= 1`
+- `(owner IS NULL AND lease_expires_at_ms IS NULL) OR (owner IS NOT NULL AND lease_expires_at_ms IS NOT NULL)`
+
+This is not a migration engine and not a structural-superset policy. Extra
+columns, affinity-compatible-but-different declared types, or weakened
+constraints are drift in the current baseline.
+
+Invalid persisted rows also fail loudly through the core API. If a loaded row
+violates the owner/expiry pairing invariant or has `token <= 0`, the core
+returns `Error::InvalidLeaseRow(...)` instead of partially operating on it.
+
 ## SQL Extension
 
 `bouncer-extension` is a SQLite loadable extension. The registration code lives
@@ -150,6 +169,15 @@ SQLite lock-class failure across autocommit, deferred `BEGIN`,
 nonzero `busy_timeout`, and `journal_mode = WAL` versus `DELETE`. The matrix
 also pins that `claim_in_tx`, `renew_in_tx`, and `release_in_tx` leave lease
 state unchanged when deferred lock upgrade fails before the mutation can land.
+
+The core also now has a file-backed integrity hardening suite. It proves:
+
+- strict bootstrap rejection for drifted `bouncer_resources` schema
+- bootstrap idempotency on a valid current-shape schema
+- bootstrap preserving an existing live lease on a valid schema
+- loud failure on invalid persisted rows
+- non-mutating token-overflow and TTL-overflow paths
+- opaque text round-trip for unusual names and owners
 
 Rust wrapper tests prove negative bootstrap behavior, wrapper/core interop,
 SQL/Rust interop, borrowed-path commit/rollback, multi-mutator transactions,

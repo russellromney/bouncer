@@ -74,6 +74,11 @@ The repo now has a real Phase 001 Rust core:
 - wrapper matrix rows now pin delegation at the sanctioned boundaries:
   `Bouncer::transaction()`, `BouncerRef`, typed `Savepoint`, and a WAL
   autocommit lease-busy row
+- Phase 013 schema hardening now makes bootstrap strict against
+  drifted `bouncer_resources` schema, adds
+  `Error::SchemaMismatch { reason }`, removes dead
+  `BOUNCER_SCHEMA_VERSION`, and proves loud failure for invalid
+  persisted rows plus non-mutating overflow edges
 
 The intended model is:
 
@@ -93,16 +98,15 @@ more bindings. Python is useful as an example binding and cross-surface
 proof, but the primary correctness surfaces are `bouncer-core`,
 `bouncer-extension`, and the Rust wrapper.
 
-1. **Phase 013 — schema and data-integrity hardening.**
-   Decide and test behavior for invalid/manual rows, schema drift, old
-   schema versions, token near-overflow, bad `ttl_ms`, huge timestamps,
-   unusual names/owners, and partial application edits. Make impossible
-   rows either impossible by constraint or loud by error.
-2. **Phase 014 — docs as safety rails.**
+1. **Phase 014 — docs as safety rails.**
    Add troubleshooting and safety docs for the cases users will hit:
    lease busy vs SQLite busy vs timeout, `BEGIN IMMEDIATE` guidance,
    fencing-token obligations, pragma policy, and which surface to use
    when the caller owns the SQLite connection.
+2. **Phase 015 — deterministic-simulation footing.**
+   Decide whether to keep building the local explicit-time property
+   runner or start extracting the smallest reusable harness pieces for
+   seeded scheduling, injected time, and future SQLite fault surfaces.
 
 ## Future proposals
 

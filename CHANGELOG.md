@@ -279,3 +279,38 @@ Clarified:
   failures to generic `SQLITE_ERROR` carrying busy/locked text; that
   fallback is now pinned explicitly in the matrix instead of being an
   implicit string-match assumption
+
+### Phase 013 — schema and data-integrity hardening
+
+Added:
+
+- strict bootstrap-time schema validation in `bouncer-core` for
+  preexisting `bouncer_resources` tables
+- public `Error::SchemaMismatch { reason: String }` for incompatible
+  persisted schema drift
+- `bouncer-core/tests/integrity.rs`, a file-backed hardening suite for
+  schema drift, invalid persisted rows, token near-overflow, TTL edges,
+  bootstrap idempotency, existing-live-lease preservation, and unusual
+  text round-trip behavior
+
+Changed:
+
+- `bootstrap_bouncer_schema(conn)` no longer silently accepts arbitrary
+  preexisting `bouncer_resources` table shapes; it now fails loudly when
+  the persisted schema drifts from the proved contract
+- schema matching is intentionally strict in this phase: exact six
+  columns, column order, declared type text, required nullability,
+  primary-key position on `name`, and the two load-bearing CHECK
+  constraints
+- invalid persisted rows that violate the owner/expiry pairing
+  invariant or `token >= 1` now have direct hardening proof across
+  public core operations
+- dead `BOUNCER_SCHEMA_VERSION` was removed; schema version remains
+  implicit in the exact proved table shape rather than stored separately
+
+Clarified:
+
+- this phase adds loud failure, not migration or repair; old/incompatible
+  schema is treated as drift until a future upgrade story exists
+- `SchemaMismatch.reason` is human-readable diagnostic text, not part of
+  the stable caller contract
