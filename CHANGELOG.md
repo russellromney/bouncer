@@ -215,3 +215,35 @@ Added:
   working `enable_load_extension` snippet
 - root `README.md` "Choosing a surface" section showing SQL
   extension, Python binding, and Rust wrapper side by side
+
+### Phase 011 — deterministic invariant runner
+
+Added:
+
+- `bouncer-core/tests/invariants.rs`, a deterministic core-level
+  invariant runner over `claim`, `renew`, `release`, `inspect`,
+  `owner`, and `token`
+- a seeded xorshift64-style test RNG with no new property-testing
+  dependency
+- a readable fixed-sequence lifecycle test covering first claim, busy
+  claim, wrong-owner renew, valid renew, wrong-owner release, valid
+  release, reclaim after release, expiry takeover, and token
+  monotonicity
+- a generated invariant test over 1000 seeds × 100 steps against
+  in-memory SQLite with default pragmas
+- a direct core regression test proving `renew` does not shorten an
+  existing live lease
+
+Changed:
+
+- `renew` now preserves or extends a live lease expiry instead of
+  blindly replacing it with `now_ms + ttl_ms`
+- the renew contract is now:
+  `lease_expires_at_ms = max(current_expiry, now_ms + ttl_ms)`
+
+Clarified:
+
+- Phase 011 proves the explicit-time autocommit lease state machine at a
+  higher level through generated deterministic sequences
+- caller-owned transaction generation, SQLite contention/settings
+  matrix work, and corruption/manual-row hardening remain future phases

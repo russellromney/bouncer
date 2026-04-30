@@ -20,8 +20,10 @@ claim receives a larger fencing token, so tokens remain monotonic across
 claim, expiry, release, and reclaim.
 
 `inspect(name, now_ms)` returns a live lease only. Expired or released rows do
-not count as owned. `renew` succeeds only for the current live owner. `release`
-succeeds only for the current live owner.
+not count as owned. `renew` succeeds only for the current live owner and
+never shortens a live lease; expiry becomes
+`max(current_expiry, now_ms + ttl_ms)`. `release` succeeds only for the
+current live owner.
 
 The core keeps time explicit through `now_ms`. Time is used for lease expiry
 bookkeeping, not as an ordering primitive. Stale-actor safety flows through
@@ -127,6 +129,12 @@ The core tests prove lease semantics, file-backed multi-connection behavior,
 transaction commit/rollback, multi-mutator transactions, read helpers inside a
 transaction, semantic stress inside a transaction, savepoint rollback, and
 lock/busy behavior under deferred multi-connection writer contention.
+
+The core also now has a deterministic invariant runner over seeded
+explicit-time autocommit operation sequences. It proves high-level lease
+invariants such as one live owner per sampled time, monotonic fencing
+tokens, post-release row shape, non-mutating busy/wrong-owner paths, and
+renew preserving or extending expiry without shortening it.
 
 Rust wrapper tests prove negative bootstrap behavior, wrapper/core interop,
 SQL/Rust interop, borrowed-path commit/rollback, multi-mutator transactions,

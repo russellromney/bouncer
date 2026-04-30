@@ -58,6 +58,10 @@ The repo now has a real Phase 001 Rust core:
   (SQL extension, Python binding, Rust wrapper) and tell
   `sqlite3.Connection`-owning Python callers to use the SQL extension
   path
+- Phase 011 deterministic invariant runner now proves the explicit-time
+  autocommit lease state machine through seeded generated sequences
+- the core renew contract now preserves or extends a live lease expiry
+  instead of allowing renew to shorten it
 
 The intended model is:
 
@@ -77,17 +81,7 @@ more bindings. Python is useful as an example binding and cross-surface
 proof, but the primary correctness surfaces are `bouncer-core`,
 `bouncer-extension`, and the Rust wrapper.
 
-1. **Phase 011 — deterministic invariant runner.**
-   Add a deterministic core-level operation runner over claim, renew,
-   release, inspect, owner, and token. Generate many explicit-time
-   operation sequences across resources and owners. Assert invariants:
-   no two live owners for one resource, fencing tokens never decrease,
-   release never resets token state, wrong owners cannot renew/release,
-   expiry makes takeover possible, and rejected operations do not mutate
-   state. This is the first small DST-shaped harness: seeded operations,
-   injected time, replayable failures, and property assertions, without
-   yet adding fault injection, VFS shims, or a shared family simulator.
-2. **Phase 012 — SQLite behavior matrix.**
+1. **Phase 012 — SQLite behavior matrix.**
    Exhaustively pin the lease behavior under `BEGIN`, `BEGIN IMMEDIATE`,
    savepoints, autocommit, two connections, zero `busy_timeout`, nonzero
    `busy_timeout`, lock contention, and practical SQLite settings such
@@ -95,12 +89,12 @@ proof, but the primary correctness surfaces are `bouncer-core`,
    and extension loading. The goal is to clearly separate "lease busy"
    from "SQLite writer lock busy" and prove Bouncer does not accidentally
    depend on one happy-path SQLite setup.
-3. **Phase 013 — schema and data-integrity hardening.**
+2. **Phase 013 — schema and data-integrity hardening.**
    Decide and test behavior for invalid/manual rows, schema drift, old
    schema versions, token near-overflow, bad `ttl_ms`, huge timestamps,
    unusual names/owners, and partial application edits. Make impossible
    rows either impossible by constraint or loud by error.
-4. **Phase 014 — docs as safety rails.**
+3. **Phase 014 — docs as safety rails.**
    Add troubleshooting and safety docs for the cases users will hit:
    lease busy vs SQLite busy vs timeout, `BEGIN IMMEDIATE` guidance,
    fencing-token obligations, pragma policy, and which surface to use

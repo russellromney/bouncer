@@ -28,7 +28,8 @@ Session:
     strictly larger token
   - busy claims do not mutate state
   - wrong-owner renew/release attempts do not mutate state
-  - successful renew keeps the token and extends expiry
+  - successful renew keeps the token and never shortens expiry; expiry
+    becomes `max(current_expiry, now_ms + ttl_ms)`
   - successful release clears live ownership, clears expiry, preserves
     token state, and leaves the row reclaimable
   - expired leases are not live and can be taken over

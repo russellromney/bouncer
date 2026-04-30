@@ -388,3 +388,237 @@ Phase 011 is now ready for implementation review handoff. The remaining
 shape is intentionally narrow: core-only, deterministic, explicit-time,
 autocommit operations, replayable by seed, with no Python or SQLite
 settings matrix work.
+
+## Implementation Notes 1
+
+Session:
+- A
+
+Files changed:
+- `bouncer-core/tests/invariants.rs` (new)
+
+What landed:
+- A single integration test file at the pinned location, exercising
+  `bouncer-core`'s public API (`claim`, `renew`, `release`, `inspect`,
+  `owner`, `token`) plus direct `bouncer_resources` reads for row-shape
+  checks.
+- A 5-line xorshift64-style RNG seeded from `u64`. No new
+  property-testing dependency. Seed-zero collapse is avoided by mixing
+  in a non-zero offset and forcing a non-zero state.
+- An `Op` enum covering `Claim`, `Renew`, `Release`, `Inspect`, `Owner`,
+  `Token`, and `AdvanceTime`.
+- A `Model` with per-resource `last_token`, `row_owner`, and
+  `row_expires_at_ms`. Mutators advance a sequence-monotonic clock by 1
+  before applying their `now_ms`; `AdvanceTime` adds further deltas;
+  reads do not move the clock. Read operations sample the clock plus
+  expiry boundary points (exp-1, exp, exp+1).
+- Per-step invariant checks across all 4 resources covering:
+  - `inspect` agrees with `owner` at the model clock
+  - `inspect` agrees with the model
+  - `token()` agrees with the model and with a live lease's token
+  - direct row read confirms `(owner, token, lease_expires_at_ms)`
+    shape, including the post-release nullability invariant
+- Two tests:
+  - `fixed_sequence_exercises_full_lifecycle` — readable hand-written
+    sequence covering first claim, busy, wrong-owner renew, valid
+    renew, wrong-owner release, valid release, reclaim after release,
+    expiry takeover, and token monotonicity through all of that.
+  - `generated_invariants_hold_across_seeds` — 1000 seeds × 100 steps
+    against in-memory SQLite with default pragmas.
+
+Decisions honored:
+- [D1]–[D14] all reflected in the runner.
+- No production code changed. The runner did not surface a real core
+  bug, so the in-scope-bug-fix clause ([D7]) was not exercised.
+- Python was not touched.
+- `*_in_tx` paths are not generated; they remain Phase 012's surface.
+
+Verification:
+- `cargo test -p bouncer-core` — 26 lib tests + 2 invariant tests pass.
+  Generated test runs in ~8.7s on its own.
+- `make test-rust` — entire Rust suite (core, wrapper, extension,
+  invariants) passes. Generated test runs in ~21s under the combined
+  invocation; acceptable for the pinned 1000 × 100 budget.
+- Failure messages include `seed={seed} step={step}` in every assertion
+  and panic so any future finding is replayable.
+
+Notes for the reviewer:
+- The runner depends only on `bouncer-core`'s public API and one direct
+  `SELECT` from `bouncer_resources`. No private helpers reached.
+- Generated test cost is dominated by per-step invariant queries (~16
+  SQL calls per step). If budget creep becomes an issue later, the
+  cheapest reduction is folding `inspect`/`owner`/`token` reads into a
+  single `read_row`-derived check; left as-is for now since the public
+  API is the contract and exercising it on every step is the point.
+
+## Implementation Review 1
+
+Target:
+- implementation review
+
+Session:
+- B
+
+Model family:
+- GPT-5.5
+
+Artifacts reviewed:
+- `spec-diff.md`
+- `plan.md`
+- `reviews_and_decisions.md`
+- `bouncer-core/tests/invariants.rs`
+
+Verification reviewed:
+- `cargo test -p bouncer-core`
+- `make test-rust`
+
+### Positive conformance review
+
+- [P10] The runner lands at the pinned location:
+  `bouncer-core/tests/invariants.rs`. It is an integration test using
+  the public `bouncer-core` API rather than private helpers, matching
+  [D10].
+- [P11] The implementation honors the scope fences. It is core-only,
+  in-memory SQLite with default pragmas, autocommit-only, explicit-time,
+  and does not touch Python, the SQL extension surface, the Rust wrapper
+  API, or production lease code.
+- [P12] The generator matches the pinned shape: xorshift64-style RNG in
+  test code, 4 resources, 6 owners, 1000 seeds, and 100 steps.
+- [P13] The assertion split matches [D6]. User-facing behavior is checked
+  through `claim`, `renew`, `release`, `inspect`, `owner`, and `token`;
+  direct `bouncer_resources` reads are used only for row-shape
+  invariants.
+- [P14] The fixed sequence is readable and covers the promised lifecycle:
+  first claim, busy claim, wrong-owner renew, valid renew,
+  wrong-owner release, valid release, reclaim after release, expiry
+  takeover, and token checks.
+- [P15] Failure messages include `seed={seed}` and `step={step}` on every
+  panic/assertion path I checked. That satisfies the replayability bar
+  in the spec diff.
+- [P16] Verification passed locally: `cargo test -p bouncer-core` passed
+  26 lib tests plus 2 invariant tests, and `make test-rust` passed the
+  Rust wrapper, extension-load, core, and invariant suites.
+
+### Negative conformance review
+
+- [N5] The phase contract says "successful renew keeps the token and
+  extends expiry," but the runner models and accepts the current core
+  behavior: renew sets `lease_expires_at_ms = now_ms + ttl_ms`, which
+  can shorten a lease if the caller renews with a smaller TTL than the
+  remaining lease duration. In `bouncer-core/tests/invariants.rs`, the
+  renew branch checks equality with `now_ms + ttl_ms`, not extension
+  relative to the previous expiry. This is not necessarily a code bug;
+  it is a semantic wording mismatch that should be decided before
+  closeout. Either update the Phase 011 spec/SYSTEM wording to say
+  "refreshes expiry to now + ttl" or change the generator so successful
+  renews always use a TTL that truly extends and assert that invariant.
+
+### Adversarial review
+
+- [A16] The runner is valuable but still model-coupled to the current
+  core semantics. That is fine for Phase 011, but [N5] shows the main
+  risk: if the model encodes existing behavior where the spec says a
+  stronger property, the generated test will bless drift instead of
+  catching it. The right mitigation is not a larger runner; it is
+  sharper semantic wording for operations like renew before future
+  phases build on this harness.
+- [A17] Replay is technically possible from seed and step, but not yet
+  ergonomic. A future failure still requires re-running the whole seed
+  sequence or editing the test locally. Acceptable for V1, but if this
+  runner catches a real bug, the next hardening pass should consider a
+  small single-seed/single-limit helper or trace dump before increasing
+  budgets.
+
+### Review verdict
+
+Accepted with one semantic follow-up before Phase 011 closeout: resolve
+[N5]. The implementation itself is solid, scoped, and tested. I would
+not block on [A17]; it is a future ergonomics improvement, not a Phase
+011 requirement.
+
+## Implementation Response 1
+
+Responding to:
+- Implementation Review 1
+
+Session:
+- A
+
+### Inputs
+
+- [N5] Renew can shorten a lease under the current implementation even
+  though the Phase 011 contract says renew extends expiry.
+- [A16] The runner can bless existing behavior if the model encodes a
+  weaker semantic property than the spec intends.
+- [A17] Replay ergonomics can improve later.
+
+### Decisions
+
+- [D15] Accept [N5] as a real core semantic bug surfaced by Phase 011.
+  Action: `renew_in_tx` now uses
+  `max(current_expiry, now_ms + ttl_ms)`, so renew is
+  extend-or-preserve and never shortens a live lease.
+  Targets: `bouncer-core/src/lib.rs`,
+  `bouncer-core/tests/invariants.rs`, `spec-diff.md`.
+
+- [D16] Accept [A16].
+  Action: the invariant model now asserts the stronger renew contract
+  instead of mirroring the old `now_ms + ttl_ms` replacement behavior.
+  Targets: `bouncer-core/tests/invariants.rs`.
+
+- [D17] Defer [A17].
+  Action: seed/step replay remains sufficient for Phase 011. Trace dump
+  or single-seed helpers can be considered if the runner catches a
+  difficult future bug.
+  Targets: future hardening only.
+
+### Verification
+
+- Added a direct core regression test:
+  `renew_does_not_shorten_existing_lease`.
+- Updated the Phase 011 spec wording:
+  successful renew keeps the token and never shortens expiry; expiry
+  becomes `max(current_expiry, now_ms + ttl_ms)`.
+- `cargo test -p bouncer-core` — 27 lib tests + 2 invariant tests pass.
+- `make test-rust` — Rust wrapper, extension-load, core, and invariant
+  suites pass.
+- `make test` — full Rust suite, extension build, Python editable
+  build, and 20 Python tests pass.
+
+### Decision verdict
+
+[N5] is resolved by making renew semantics stronger rather than
+weakening the spec wording. Bouncer V1 does not support shortening a
+live lease via `renew`; callers can `release` for immediate handoff, and
+any future shorten/yield behavior should be an explicit separate API.
+
+## Implementation Notes 2
+
+Session:
+- A
+
+Files changed:
+- `bouncer-core/src/lib.rs`
+- `bouncer-core/tests/invariants.rs`
+- `spec-diff.md`
+
+What landed:
+- `renew_in_tx` now preserves or extends a live lease expiry instead of
+  blindly replacing it with `now_ms + ttl_ms`.
+- The new contract is:
+  `lease_expires_at_ms = max(current_expiry, now_ms + ttl_ms)`.
+- A direct core regression test now proves renew does not shorten an
+  existing live lease.
+- The deterministic invariant runner now models and asserts the stronger
+  renew behavior rather than mirroring the earlier weaker semantics.
+
+Correction to Implementation Notes 1:
+- Production code did change after review. `[D15]` intentionally landed
+  a small direct core fix inside Phase 011 under the already-accepted
+  bug-fix policy.
+
+Verification:
+- `cargo test -p bouncer-core` passes with 27 core lib tests and 2
+  invariant tests.
+- `make test-rust` passes.
+- `make test` passes, including the Python binding tests.

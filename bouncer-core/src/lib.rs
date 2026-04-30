@@ -263,12 +263,15 @@ pub fn renew_in_tx(
     ttl_ms: i64,
 ) -> Result<RenewResult> {
     ensure_in_tx(conn)?;
-    let lease_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
+    let requested_expires_at_ms = checked_expiry(now_ms, ttl_ms)?;
 
     match load_resource(conn, name)? {
         None => Ok(RenewResult::Rejected { current: None }),
         Some(row) => match row.current_lease(now_ms)? {
             Some(current) if current.owner == owner => {
+                let lease_expires_at_ms =
+                    current.lease_expires_at_ms.max(requested_expires_at_ms);
+
                 conn.execute(
                     "UPDATE bouncer_resources
                      SET lease_expires_at_ms = ?2,
@@ -700,6 +703,31 @@ mod tests {
             }
             other => panic!("expected renewed result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn renew_does_not_shorten_existing_lease() {
+        let conn = open_db();
+
+        claim(&conn, "scheduler", "worker-a", 100, 100).unwrap();
+        let result = renew(&conn, "scheduler", "worker-a", 120, 10).unwrap();
+
+        match result {
+            RenewResult::Renewed(lease) => {
+                assert_live_lease(&lease, "scheduler", "worker-a", 1, 200);
+            }
+            other => panic!("expected renewed result, got {other:?}"),
+        }
+
+        assert_live_lease(
+            &inspect(&conn, "scheduler", 199)
+                .unwrap()
+                .expect("lease should remain live until original expiry"),
+            "scheduler",
+            "worker-a",
+            1,
+            200,
+        );
     }
 
     #[test]
