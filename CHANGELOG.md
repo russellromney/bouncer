@@ -314,3 +314,51 @@ Clarified:
   schema is treated as drift until a future upgrade story exists
 - `SchemaMismatch.reason` is human-readable diagnostic text, not part of
   the stable caller contract
+
+### Phase 014 — docs as safety rails
+
+Added:
+
+- `bouncer-core/tests/pragma_matrix.rs`, a file-backed pragma-neutrality
+  matrix for core bootstrap/mutators plus SQL registration and SQL
+  function calls
+- `packages/bouncer/tests/pragma_matrix.rs`, a wrapper pragma-neutrality
+  matrix for wrapper-owned bootstrap, borrowed mutators,
+  `Bouncer::transaction()`, and typed savepoints
+- a compact root `README.md` safety-rails section covering lease busy
+  versus SQLite busy/locked, `BEGIN IMMEDIATE`, pragma ownership,
+  fencing-token obligations, and strict bootstrap drift rejection
+
+Clarified:
+
+- pragma-neutrality is now directly proved for the pinned five-pragmas
+  set: `journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`,
+  and `foreign_keys`
+- Bouncer does not set or normalize caller-owned pragma policy as a
+  side effect of bootstrap or lease operations across the sanctioned
+  core, SQL, and wrapper surfaces
+
+### Phase 015 — user journey acceptance
+
+Added:
+
+- `packages/bouncer/tests/user_journeys.rs`, a direct public-surface
+  acceptance suite covering fresh bootstrap + first claim,
+  second-caller busy, release/reclaim token increase,
+  deterministic expiry/reclaim token increase, cross-surface state
+  visibility, caller-owned transaction atomic visibility, and loud
+  drifted-schema bootstrap failure
+- Python acceptance rows in
+  `packages/bouncer-py/tests/test_bouncer.py` for cross-surface state
+  visibility and loud drifted-schema bootstrap failure
+- `packages/bouncer/examples/three_surface_observer.rs`, a small
+  wrapper observer used by the Python acceptance suite to directly
+  prove Rust wrapper / SQL extension / Python binding interoperability
+  on one database file
+
+Clarified:
+
+- this phase adds direct user-shaped proof, not new lease or schema
+  semantics
+- three-surface interoperability is now directly proved in one named
+  journey instead of being inferred from pairwise integration rows

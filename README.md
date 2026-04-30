@@ -109,6 +109,41 @@ tx.claim("scheduler", "worker-a", Duration::from_secs(30))?;
 tx.commit()?;
 ```
 
+## Safety rails
+
+These are the sharp edges most likely to matter in practice.
+
+**Lease busy is not SQLite busy/locked.**
+When another owner already holds a live lease, Bouncer returns `Busy`
+(`ClaimResult::Busy`, SQL `NULL`, or Python `acquired=False`). That is a
+*lease semantic*, not a lock failure. SQLite `BUSY` / `LOCKED` means
+writer contention or a deferred transaction that failed to upgrade.
+
+**Bouncer does not own your pragma policy.**
+`journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`, and
+`foreign_keys` survive bootstrap and lease operations unchanged. Set
+them before you call `bootstrap()`, or on the connection you hand to
+`BouncerRef`. The wrapper and SQL extension do not normalize them.
+
+**When to use `BEGIN IMMEDIATE`.**
+If you need up-front writer intent — for example, to guarantee that a
+business write and a lease mutation commit or roll back atomically —
+open the outer transaction with `BEGIN IMMEDIATE`. Bouncer autocommit
+mutators already do this internally; caller-owned transactions follow
+their outer mode. Deferred `BEGIN` defers lock upgrade and can surface
+SQLite busy under contention instead of lease busy.
+
+**Fencing tokens are Bouncer's responsibility; carrying them is yours.**
+Bouncer guarantees monotonic fencing tokens across claim, expiry,
+release, and reclaim. Downstream systems must carry the token across
+their external side-effect boundary and reject work whose token is
+stale. Bouncer cannot enforce that outside SQLite.
+
+**Bootstrap rejects drifted schema.**
+If a `bouncer_resources` table already exists with a different shape,
+bootstrap fails with `SchemaMismatch` rather than silently accepting it.
+This is not a migration engine. Fix the table or start with a fresh file.
+
 ## Non-goals
 
 - distributed consensus

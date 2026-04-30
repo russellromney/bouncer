@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -370,3 +372,168 @@ def test_transaction_execute_binds_positional_parameters(tmp_path: Path) -> None
     with sqlite3.connect(path) as conn:
         row = conn.execute("SELECT note FROM business_events").fetchone()
     assert row[0] == payload
+
+
+def test_python_cross_surface_interop(tmp_path: Path) -> None:
+    path = tmp_path / "app.sqlite3"
+    db = bouncer.open(path)
+    db.bootstrap()
+
+    # Python claims with a long TTL so the lease stays live.
+    claim = db.claim("scheduler", "python-worker", ttl_ms=86_400_000)
+    assert claim.acquired
+    assert claim.lease is not None
+    first_token = claim.lease.token
+
+    # SQL extension sees the same lease.
+    conn = connect_sql(path)
+    try:
+        owner = conn.execute(
+            "SELECT bouncer_owner(?, ?)", ("scheduler", claim.lease.lease_expires_at_ms - 1)
+        ).fetchone()[0]
+        token = conn.execute("SELECT bouncer_token(?)", ("scheduler",)).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert owner == "python-worker"
+    assert token == first_token
+
+    # SQL extension releases.
+    conn = connect_sql(path)
+    try:
+        released = conn.execute(
+            "SELECT bouncer_release(?, ?, ?)",
+            ("scheduler", "python-worker", claim.lease.lease_expires_at_ms - 1),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert released == 1
+
+    # Python sees no owner after SQL release.
+    assert db.inspect("scheduler") is None
+
+    # Python reclaims; token should increase.
+    reclaim = db.claim("scheduler", "next-worker", ttl_ms=86_400_000)
+    assert reclaim.acquired
+    assert reclaim.lease is not None
+    assert reclaim.lease.token > first_token
+
+    # SQL sees the new owner and token.
+    conn = connect_sql(path)
+    try:
+        sql_owner_val = conn.execute(
+            "SELECT bouncer_owner(?, ?)",
+            ("scheduler", reclaim.lease.lease_expires_at_ms - 1),
+        ).fetchone()[0]
+        sql_token_val = conn.execute(
+            "SELECT bouncer_token(?)", ("scheduler",)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert sql_owner_val == "next-worker"
+    assert sql_token_val == reclaim.lease.token
+
+
+def test_python_bootstrap_fails_on_drifted_schema(tmp_path: Path) -> None:
+    path = tmp_path / "app.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE bouncer_resources ("
+            "name TEXT PRIMARY KEY, owner TEXT, token INTEGER NOT NULL, "
+            "lease_expires_at_ms INTEGER, created_at_ms INTEGER NOT NULL)"
+        )
+
+    db = bouncer.open(path)
+    with pytest.raises(bouncer.BouncerError, match="schema mismatch|SchemaMismatch"):
+        db.bootstrap()
+
+
+def test_three_surfaces_observe_same_state(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    cargo = "cargo"
+
+    path = tmp_path / "three_surface.sqlite3"
+    db = bouncer.open(path)
+    db.bootstrap()
+
+    claim = db.claim("scheduler", "python-owner", ttl_ms=86_400_000)
+    assert claim.acquired
+    assert claim.lease is not None
+    first_token = claim.lease.token
+
+    conn = connect_sql(path)
+    try:
+        sql_owner = conn.execute(
+            "SELECT bouncer_owner(?, ?)",
+            ("scheduler", claim.lease.lease_expires_at_ms - 1),
+        ).fetchone()[0]
+        sql_token = conn.execute("SELECT bouncer_token(?)", ("scheduler",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert sql_owner == "python-owner"
+    assert sql_token == first_token
+
+    result = subprocess.run(
+        [cargo, "run", "--example", "three_surface_observer", "--", str(path), "scheduler"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=str(repo_root),
+    )
+    wrapper_view = json.loads(result.stdout.strip())
+    assert wrapper_view["exists"] is True
+    assert wrapper_view["owner"] == "python-owner"
+    assert wrapper_view["token"] == first_token
+
+    conn = connect_sql(path)
+    try:
+        released = conn.execute(
+            "SELECT bouncer_release(?, ?, ?)",
+            ("scheduler", "python-owner", claim.lease.lease_expires_at_ms - 1),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert released == 1
+
+    assert db.inspect("scheduler") is None
+
+    result = subprocess.run(
+        [cargo, "run", "--example", "three_surface_observer", "--", str(path), "scheduler"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=str(repo_root),
+    )
+    wrapper_view = json.loads(result.stdout.strip())
+    assert wrapper_view["exists"] is False
+
+    reclaim = db.claim("scheduler", "next-owner", ttl_ms=86_400_000)
+    assert reclaim.acquired
+    assert reclaim.lease is not None
+    assert reclaim.lease.token > first_token
+
+    conn = connect_sql(path)
+    try:
+        sql_owner2 = conn.execute(
+            "SELECT bouncer_owner(?, ?)",
+            ("scheduler", reclaim.lease.lease_expires_at_ms - 1),
+        ).fetchone()[0]
+        sql_token2 = conn.execute("SELECT bouncer_token(?)", ("scheduler",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert sql_owner2 == "next-owner"
+    assert sql_token2 == reclaim.lease.token
+
+    result = subprocess.run(
+        [cargo, "run", "--example", "three_surface_observer", "--", str(path), "scheduler"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=str(repo_root),
+    )
+    wrapper_view = json.loads(result.stdout.strip())
+    assert wrapper_view["exists"] is True
+    assert wrapper_view["owner"] == "next-owner"
+    assert wrapper_view["token"] == reclaim.lease.token

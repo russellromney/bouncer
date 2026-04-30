@@ -112,7 +112,8 @@ open transaction on that connection. The transaction handle exposes `inspect`,
 
 The wrapper requires explicit `bootstrap()` and does not create schema state in
 `open(path)`. It is also pragma-neutral: callers own connection policy such as
-`journal_mode` and `busy_timeout`.
+`journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`, and
+`foreign_keys`.
 
 ## Python Binding
 
@@ -192,6 +193,13 @@ writer intent up front, `BouncerRef` mirrors deferred lock-upgrade behavior,
 typed `Savepoint` commit participates in the outer transaction boundary, and
 wrapper autocommit lease-busy behavior stays stable under `journal_mode = WAL`.
 
+The core and wrapper also now have file-backed pragma-neutrality matrices.
+They prove Bouncer does not rewrite the pinned caller-owned pragma set
+(`journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`,
+`foreign_keys`) across core bootstrap/mutators, SQL function registration and
+calls, wrapper bootstrap, borrowed-path mutators, wrapper-owned transaction
+mutators, and typed savepoints.
+
 Rust tests also build and load the `bouncer-extension` cdylib through rusqlite
 and exercise every `bouncer_*` function.
 
@@ -199,6 +207,15 @@ Python tests prove explicit bootstrap, full lifecycle behavior, transaction
 commit/rollback coupling, terminal context-manager behavior, parameter binding,
 `BouncerError` coverage for core and SQL errors, multi-statement rejection,
 begin-failure re-entry, and SQLite-extension interop on one database file.
+
+There is also now a small public-surface acceptance layer. The Rust and Python
+acceptance tests prove fresh bootstrap plus first claim, independent second
+caller busy, release/reclaim token increase, deterministic expiry/reclaim token
+increase through explicit-time SQL, atomic commit visibility for business write
+plus lease mutation, loud drifted-schema bootstrap failure through wrapper /
+Python / SQL bootstrap, and one direct three-surface journey where Python, SQL,
+and the Rust wrapper observe the same lease state transitions on one database
+file.
 
 Contention semantics are primarily proven at the core and extension boundaries.
 The wrappers prove thin delegation, interop, and transaction participation

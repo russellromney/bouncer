@@ -79,6 +79,20 @@ The repo now has a real Phase 001 Rust core:
   `Error::SchemaMismatch { reason }`, removes dead
   `BOUNCER_SCHEMA_VERSION`, and proves loud failure for invalid
   persisted rows plus non-mutating overflow edges
+- Phase 014 docs-as-safety-rails work now adds a direct pragma-neutrality
+  matrix and operator guidance for lease busy versus SQLite busy/locked,
+  `BEGIN IMMEDIATE`, fencing-token obligations, strict bootstrap drift
+  rejection, and surface choice
+- Phase 014 pragma-neutrality is now directly proved across the pinned
+  five-pragmas set (`journal_mode`, `synchronous`, `busy_timeout`,
+  `locking_mode`, `foreign_keys`) for core, SQL registration/calls, and
+  wrapper bootstrap / borrowed / transaction / savepoint surfaces
+- Phase 015 user-journey acceptance now proves user-shaped public-surface
+  flows on one real database file: fresh bootstrap + first claim,
+  second-caller busy, release/reclaim and expiry/reclaim token increase,
+  atomic transaction visibility, loud drifted-schema bootstrap failure,
+  and direct three-surface interop across Rust wrapper, SQL extension,
+  and Python binding
 
 The intended model is:
 
@@ -93,20 +107,21 @@ The intended model is:
 
 ## Next build steps
 
-The next Bouncer work should harden the Rust/SQLite primitive, not add
-more bindings. Python is useful as an example binding and cross-surface
-proof, but the primary correctness surfaces are `bouncer-core`,
-`bouncer-extension`, and the Rust wrapper.
+The next Bouncer work should still deepen the Rust/SQLite primitive, not
+add more bindings. Python remains valuable as a cross-surface proof
+surface, but the main leverage is now in broader deterministic stress,
+not more API area.
 
-1. **Phase 014 — docs as safety rails.**
-   Add troubleshooting and safety docs for the cases users will hit:
-   lease busy vs SQLite busy vs timeout, `BEGIN IMMEDIATE` guidance,
-   fencing-token obligations, pragma policy, and which surface to use
-   when the caller owns the SQLite connection.
-2. **Phase 015 — deterministic-simulation footing.**
-   Decide whether to keep building the local explicit-time property
-   runner or start extracting the smallest reusable harness pieces for
-   seeded scheduling, injected time, and future SQLite fault surfaces.
+1. **Phase 016 — deterministic-simulation footing.**
+   Extend the current deterministic runner beyond single-connection
+   autocommit sequences into a seeded multi-connection harness with
+   explicit-time interleavings, caller-owned transaction/savepoint
+   participation, and reproducible traces. The goal is to widen the
+   proof envelope without widening product semantics.
+2. **Phase 017 — decide whether SQLite fault injection belongs local or shared.**
+   Use what we learn from Phase 016 to decide whether Bouncer should
+   grow a local SQLite fault surface (busy/full/fsync-style injection)
+   or wait for a shared Honker-family deterministic harness.
 
 ## Future proposals
 
