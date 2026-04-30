@@ -58,6 +58,13 @@ transaction or savepoint. In autocommit mode they preserve the core
 that boundary, so lock-upgrade timing follows the caller's outer transaction
 mode.
 
+When a `bouncer_*` SQL function hits an underlying SQLite lock failure,
+SQLite/rusqlite can collapse some UDF callback lock failures to a generic
+`SQLITE_ERROR` while preserving only busy/locked text. Outside that known
+scalar-function boundary quirk, Bouncer preserves the native SQLite
+`BUSY` / `LOCKED` error rather than turning it into a separate lease
+semantic.
+
 ## Rust Wrapper
 
 `packages/bouncer` is the Rust convenience wrapper. It exposes an owned
@@ -136,12 +143,26 @@ invariants such as one live owner per sampled time, monotonic fencing
 tokens, post-release row shape, non-mutating busy/wrong-owner paths, and
 renew preserving or extending expiry without shortening it.
 
+The core and SQL-extension tests also now include a file-backed SQLite
+behavior matrix. It proves the caller-visible split between lease busy and
+SQLite lock-class failure across autocommit, deferred `BEGIN`,
+`BEGIN IMMEDIATE`, savepoints, two connections, `busy_timeout = 0`, one small
+nonzero `busy_timeout`, and `journal_mode = WAL` versus `DELETE`. The matrix
+also pins that `claim_in_tx`, `renew_in_tx`, and `release_in_tx` leave lease
+state unchanged when deferred lock upgrade fails before the mutation can land.
+
 Rust wrapper tests prove negative bootstrap behavior, wrapper/core interop,
 SQL/Rust interop, borrowed-path commit/rollback, multi-mutator transactions,
 semantic stress, transaction-handle behavior, savepoint participation,
 transaction/savepoint durability from a fresh connection, savepoint
 renew/release, savepoint commit plus outer rollback, and deterministic
 explicit-time semantic stress.
+
+Wrapper matrix rows now prove the sanctioned wrapper boundaries follow that
+same SQLite story rather than inventing one: `Bouncer::transaction()` claims
+writer intent up front, `BouncerRef` mirrors deferred lock-upgrade behavior,
+typed `Savepoint` commit participates in the outer transaction boundary, and
+wrapper autocommit lease-busy behavior stays stable under `journal_mode = WAL`.
 
 Rust tests also build and load the `bouncer-extension` cdylib through rusqlite
 and exercise every `bouncer_*` function.

@@ -247,3 +247,35 @@ Clarified:
   higher level through generated deterministic sequences
 - caller-owned transaction generation, SQLite contention/settings
   matrix work, and corruption/manual-row hardening remain future phases
+
+### Phase 012 — SQLite behavior matrix
+
+Added:
+
+- `bouncer-core/tests/sqlite_matrix.rs`, a file-backed SQLite behavior
+  matrix for direct core calls and the in-process SQL extension surface
+- `packages/bouncer/tests/sqlite_matrix.rs`, a wrapper-only matrix for
+  `Bouncer::transaction()`, `BouncerRef`, typed `Savepoint`, and a WAL
+  autocommit lease-busy row
+- fresh-tempdir-per-row coverage for autocommit, deferred `BEGIN`,
+  `BEGIN IMMEDIATE`, savepoints, two connections, `busy_timeout = 0`,
+  one small nonzero `busy_timeout`, and `journal_mode = WAL` versus
+  `DELETE`
+- explicit deferred-contention rows for `claim_in_tx`, `renew_in_tx`,
+  and `release_in_tx`
+
+Changed:
+
+- `bouncer-core::attach_bouncer_functions` now preserves underlying
+  SQLite `BUSY` / `LOCKED` errors where the scalar-function boundary
+  allows it instead of eagerly string-wrapping every SQLite failure as
+  `UserFunctionError`
+
+Clarified:
+
+- the proved contract now separates lease busy from SQLite lock-class
+  failure across the main Rust/SQLite surfaces
+- SQLite/rusqlite can still collapse some SQL UDF callback lock
+  failures to generic `SQLITE_ERROR` carrying busy/locked text; that
+  fallback is now pinned explicitly in the matrix instead of being an
+  implicit string-match assumption

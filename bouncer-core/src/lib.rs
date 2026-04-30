@@ -447,8 +447,13 @@ fn ensure_in_tx(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn to_sql_err<E: std::fmt::Display>(err: E) -> rusqlite::Error {
-    rusqlite::Error::UserFunctionError(Box::new(std::io::Error::other(err.to_string())))
+fn to_sql_err(err: Error) -> rusqlite::Error {
+    match err {
+        Error::Sqlite(err) => err,
+        other => {
+            rusqlite::Error::UserFunctionError(Box::new(std::io::Error::other(other.to_string())))
+        }
+    }
 }
 
 fn checked_expiry(now_ms: i64, ttl_ms: i64) -> Result<i64> {

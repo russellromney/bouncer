@@ -62,6 +62,18 @@ The repo now has a real Phase 001 Rust core:
   autocommit lease state machine through seeded generated sequences
 - the core renew contract now preserves or extends a live lease expiry
   instead of allowing renew to shorten it
+- Phase 012 SQLite behavior matrix now proves the caller-visible split
+  between lease busy and SQLite lock-class failure across autocommit,
+  deferred `BEGIN`, `BEGIN IMMEDIATE`, savepoints, two connections,
+  `busy_timeout = 0`, one small nonzero `busy_timeout`, and
+  `journal_mode = WAL` versus `DELETE`
+- the SQL extension now preserves native SQLite `BUSY` / `LOCKED`
+  errors where the scalar-function boundary allows it, while the known
+  UDF fallback path remains pinned as generic `SQLITE_ERROR` carrying
+  busy/locked text
+- wrapper matrix rows now pin delegation at the sanctioned boundaries:
+  `Bouncer::transaction()`, `BouncerRef`, typed `Savepoint`, and a WAL
+  autocommit lease-busy row
 
 The intended model is:
 
@@ -81,20 +93,12 @@ more bindings. Python is useful as an example binding and cross-surface
 proof, but the primary correctness surfaces are `bouncer-core`,
 `bouncer-extension`, and the Rust wrapper.
 
-1. **Phase 012 — SQLite behavior matrix.**
-   Exhaustively pin the lease behavior under `BEGIN`, `BEGIN IMMEDIATE`,
-   savepoints, autocommit, two connections, zero `busy_timeout`, nonzero
-   `busy_timeout`, lock contention, and practical SQLite settings such
-   as `journal_mode` (`WAL`, `DELETE`), `synchronous`, `locking_mode`,
-   and extension loading. The goal is to clearly separate "lease busy"
-   from "SQLite writer lock busy" and prove Bouncer does not accidentally
-   depend on one happy-path SQLite setup.
-2. **Phase 013 — schema and data-integrity hardening.**
+1. **Phase 013 — schema and data-integrity hardening.**
    Decide and test behavior for invalid/manual rows, schema drift, old
    schema versions, token near-overflow, bad `ttl_ms`, huge timestamps,
    unusual names/owners, and partial application edits. Make impossible
    rows either impossible by constraint or loud by error.
-3. **Phase 014 — docs as safety rails.**
+2. **Phase 014 — docs as safety rails.**
    Add troubleshooting and safety docs for the cases users will hit:
    lease busy vs SQLite busy vs timeout, `BEGIN IMMEDIATE` guidance,
    fencing-token obligations, pragma policy, and which surface to use
