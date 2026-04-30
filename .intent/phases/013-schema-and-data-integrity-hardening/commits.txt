@@ -4,7 +4,7 @@ Phase: 013 — schema and data-integrity hardening
 
 ## Commits
 
-- `5849cb9` — Land Phase 013 schema and data-integrity hardening
+- `469baaa` — Land Phase 013 schema and data-integrity hardening
 
 ## Evidence
 
