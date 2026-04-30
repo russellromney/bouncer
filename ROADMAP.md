@@ -2,126 +2,62 @@
 
 ## Summary
 
-Bouncer should be the sharpest "who owns this right now?" primitive for the Honker family.
+Bouncer should be the sharpest "who owns this right now?" primitive for
+SQLite apps.
 
-Its job is not to become a scheduler or workflow system. Its job is to provide a durable lease with expiry and fencing in the same SQLite file the app already uses.
+Its job is not to become a scheduler or workflow system. Its job is to
+provide a durable lease with expiry and fencing in the same SQLite file
+the app already uses.
 
 ## Intent artifacts
 
 - `SYSTEM.md` is the current English model of Bouncer.
 - `CHANGELOG.md` records what has landed.
-- future meaningful changes should add `.intent/` records with spec diffs, plans, and `reviews_and_decisions.md`.
+- future meaningful changes should add phase records with spec diffs,
+  plans, and `reviews_and_decisions.md`.
 
 ## Current status
 
-The repo now has a real Phase 001 Rust core:
+Bouncer now has a real shipped baseline: core lease semantics, a SQLite
+extension surface, a Rust wrapper, a Python binding, and a layered proof
+stack that covers semantics, SQLite behavior, integrity hardening,
+pragma-neutrality, and user-shaped acceptance.
 
-- `bouncer-core` owns the first SQLite schema
-- the core contract exposes `inspect`, `claim`, `renew`, and `release`
-- fencing tokens are monotonic across expiry, release, and re-claim
-- Rust tests pin the current semantics
-- a first Rust wrapper crate now exists in `packages/bouncer`
-- the wrapper stays thin, keeps bootstrap explicit, and leaves time-ordering concerns out of scope
-- a first SQLite loadable-extension crate now exists in `bouncer-extension`
-- the first `bouncer_*` SQL surface reuses `bouncer-core` semantics and keeps `now_ms` explicit
-- SQL/Rust interop is now proven on one database file
-- SQL mutators now participate in caller-owned explicit transactions and savepoints instead of failing with SQLite's nested-transaction error
-- deferred multi-connection writer contention is now pinned as a lock/busy failure in the in-transaction SQL path
-- borrowed Rust mutators now follow the same transaction model as the SQL extension instead of tripping nested-transaction errors on caller-owned transactions
-- the core now exposes explicit public `*_in_tx` helpers with a fail-fast transaction-state guard
-- the wrapper now exposes a sanctioned `Bouncer::transaction()` handle
-  with checked `BEGIN IMMEDIATE` semantics and same-wrapper exclusivity
-- the wrapper transaction handle now exposes a sanctioned `savepoint()`
-  nested boundary with tested claim/renew/release/inspect behavior
-- wrapper transaction and savepoint commits are now proven visible from
-  fresh connections after the outer transaction commits
-- wrapper semantic-stress tests now use explicit-time core helpers
-  instead of sleep-based expiry waits where practical
-- `packages/bouncer/src/lib.rs` has been split so the public wrapper
-  surface stays small and the test modules carry the test bulk
-- wrapper and system docs now name the recommended default surfaces:
-  `Bouncer`, `Bouncer::transaction()`, and `BouncerRef`
-- a first Python binding now exists in `packages/bouncer-py`
-- the Python binding exposes explicit `bootstrap()`, `inspect`, `claim`,
-  `renew`, `release`, and a transaction context manager
-- Python transaction tests prove business writes and lease mutations
-  commit and roll back together
-- Python cross-surface tests prove the binding and SQLite extension share
-  one database-file contract
-- the Python `Transaction` is honestly context-manager-first;
-  `BEGIN IMMEDIATE` opens inside `__enter__`, the `Transaction` is
-  single-use, and pre-`__enter__` verb calls fail loudly
-- `Transaction.__del__` is gone; the native `Drop for NativeBouncer` is
-  the only remaining transaction safety net
-- `bouncer-py`'s Rust edition matches its in-repo siblings (2021)
-- the package and root READMEs now document the three caller surfaces
-  (SQL extension, Python binding, Rust wrapper) and tell
-  `sqlite3.Connection`-owning Python callers to use the SQL extension
-  path
-- Phase 011 deterministic invariant runner now proves the explicit-time
-  autocommit lease state machine through seeded generated sequences
-- the core renew contract now preserves or extends a live lease expiry
-  instead of allowing renew to shorten it
-- Phase 012 SQLite behavior matrix now proves the caller-visible split
-  between lease busy and SQLite lock-class failure across autocommit,
-  deferred `BEGIN`, `BEGIN IMMEDIATE`, savepoints, two connections,
-  `busy_timeout = 0`, one small nonzero `busy_timeout`, and
-  `journal_mode = WAL` versus `DELETE`
-- the SQL extension now preserves native SQLite `BUSY` / `LOCKED`
-  errors where the scalar-function boundary allows it, while the known
-  UDF fallback path remains pinned as generic `SQLITE_ERROR` carrying
-  busy/locked text
-- wrapper matrix rows now pin delegation at the sanctioned boundaries:
-  `Bouncer::transaction()`, `BouncerRef`, typed `Savepoint`, and a WAL
-  autocommit lease-busy row
-- Phase 013 schema hardening now makes bootstrap strict against
-  drifted `bouncer_resources` schema, adds
-  `Error::SchemaMismatch { reason }`, removes dead
-  `BOUNCER_SCHEMA_VERSION`, and proves loud failure for invalid
-  persisted rows plus non-mutating overflow edges
-- Phase 014 docs-as-safety-rails work now adds a direct pragma-neutrality
-  matrix and operator guidance for lease busy versus SQLite busy/locked,
-  `BEGIN IMMEDIATE`, fencing-token obligations, strict bootstrap drift
-  rejection, and surface choice
-- Phase 014 pragma-neutrality is now directly proved across the pinned
-  five-pragmas set (`journal_mode`, `synchronous`, `busy_timeout`,
-  `locking_mode`, `foreign_keys`) for core, SQL registration/calls, and
-  wrapper bootstrap / borrowed / transaction / savepoint surfaces
-- Phase 015 user-journey acceptance now proves user-shaped public-surface
-  flows on one real database file: fresh bootstrap + first claim,
-  second-caller busy, release/reclaim and expiry/reclaim token increase,
-  atomic transaction visibility, loud drifted-schema bootstrap failure,
-  and direct three-surface interop across Rust wrapper, SQL extension,
-  and Python binding
+`SYSTEM.md` is the current English model of that baseline.
+`CHANGELOG.md` is the detailed record of what has landed so far.
 
-The intended model is:
+The intended product model is:
 
-- `honker`
-  generic queue / wake / retry substrate
 - `bouncer-core`
   Bouncer-specific schema and SQLite contract
 - `bouncer-extension`
   shared SQLite-facing SQL boundary
-- `bouncer`
-  thin language bindings
+- `packages/bouncer`
+  Rust convenience wrapper
+- `packages/bouncer-py`
+  Python convenience/demo wrapper
 
 ## Next build steps
 
-The next Bouncer work should still deepen the Rust/SQLite primitive, not
-add more bindings. Python remains valuable as a cross-surface proof
-surface, but the main leverage is now in broader deterministic stress,
-not more API area.
+The next Bouncer work should focus on surface clarity and correctness,
+not on expanding footprint.
 
-1. **Phase 016 — deterministic-simulation footing.**
-   Extend the current deterministic runner beyond single-connection
-   autocommit sequences into a seeded multi-connection harness with
-   explicit-time interleavings, caller-owned transaction/savepoint
-   participation, and reproducible traces. The goal is to widen the
-   proof envelope without widening product semantics.
-2. **Phase 017 — decide whether SQLite fault injection belongs local or shared.**
-   Use what we learn from Phase 016 to decide whether Bouncer should
-   grow a local SQLite fault surface (busy/full/fsync-style injection)
-   or wait for a shared Honker-family deterministic harness.
+1. **Python surface and boundary pass.**
+   Re-check whether the Python binding is exposing exactly the right
+   surface:
+   - owned-connection convenience/demo only
+   - no shadow caller-owned-connection API
+   - docs and examples that point caller-owned Python SQLite users at
+     the SQL extension
+   - clear parity and non-parity with the Rust wrapper
+2. **Cross-surface boundary polish.**
+   Keep making the SQL extension feel like the base interoperability
+   surface and the Rust/Python wrappers feel like convenience layers
+   rather than competing products.
+3. **Targeted stress hardening.**
+   Add more narrow proof where it buys confidence, especially around
+   multi-connection behavior, without committing to a full deterministic
+   simulator program unless real bugs justify that investment.
 
 ## Future proposals
 
@@ -141,143 +77,42 @@ story needs it, and keep the same terminal handle shape:
 - `rollback(self)` rolls back to and releases the nested savepoint
 - outer rollback still discards all nested work
 
-### Language bindings strategy
+### Surface posture
 
-Bouncer should match Honker's binding footprint where a language's
-stdlib SQLite extension-load path is awkward enough that hiding it
-inside a typed wrapper carries real value. Don't preemptively build
-bindings for languages where the SQL extension is one-line to load
-and the four `bouncer_*` SQL functions are easy to call directly.
+Bouncer is not trying to grow a large binding matrix.
 
-Each binding lands when a real consumer in that language asks. This
-section exists so future-us doesn't accidentally build a Node binding
-just because Honker has one.
+The intended surface story is:
 
-Currently shipped:
+- the SQL extension is the base interoperability surface
+- the Rust wrapper is the primary convenience layer for Rust
+- the Python binding is a convenience/demo layer, not the center of the
+  product story
+- new bindings should only exist when a real consumer needs one and the
+  SQL extension alone is meaningfully awkward
 
-- **Rust** (`packages/bouncer`) — links `bouncer-core` directly. The
-  binding's value beyond the SQL extension is compile-time `&mut self`
-  exclusivity on `Bouncer::transaction()` and the `Savepoint` handle.
-  This is real and not replicable in raw SQL.
-- **Python** (`packages/bouncer-py`) — PyO3 binding linking
-  `bouncer-core`. Hides stdlib `sqlite3`'s 3-step
-  `enable_load_extension(True) → load_extension(path) →
-  enable_load_extension(False)` dance, which sits behind a
-  Python-level permission gate. Also adds typed dataclass results,
-  context-manager transactions, and `now_ms` injection.
+That means future binding work should clear a high bar:
 
-Likely future bindings, in priority order if and when a consumer
-asks:
+- a real user or product need
+- a materially better caller experience than raw SQL
+- no duplication of an already-good caller-owned connection story
 
-1. **Go** — highest awkwardness in the family. `mattn/go-sqlite3`
-   requires registering a custom `sqlite3` driver with a `ConnectHook`
-   that loads the extension on every pool connection, and Honker's
-   `honker-go` uses an atomic counter to mint unique driver names so
-   multiple databases in one process don't collide. Replicating that
-   per Bouncer caller is the worst extension-load story we've seen.
-2. **Ruby** — same 3-step `enable_load_extension(true) →
-   load_extension(path) → enable_load_extension(false)` dance Python
-   has. Honker's `honker-ruby` hides it; a Bouncer-Ruby binding would
-   too.
-3. **Elixir** — same 3-step dance via Exqlite
-   (`Sqlite3.enable_load_extension → SELECT load_extension(?) →
-   enable_load_extension(false)`). Honker's `honker-ex` hides it.
-4. **Node** — Honker's `honker-node` is FFI-linked via napi-rs, so
-   no `load_extension` involved. A Bouncer-Node binding following the
-   same FFI pattern would mostly add typed result objects and tx
-   wrapping, not awkwardness-hiding. Lower marginal value than Python
-   had, but worth Honker-stack parity.
-5. **Bun** — `raw.loadExtension(path)` is a one-liner. The only reason
-   to build a binding is Honker-stack parity. Lowest priority.
+If the SQL extension is already a clean fit for a language, that is
+usually enough.
 
-Languages we will not pursue without a strong consumer:
+### Stress and fault proof
 
-- **C++** — niche. The Honker family's C++ pattern is Zig + direct C
-  SQLite API; that style does not benefit from the kind of typed
-  wrapping Bouncer offers.
-- **Java, .NET, Swift, etc.** — same posture. Build only when a real
-  consumer arrives.
+Bouncer already has good direct proof for semantics, SQLite behavior,
+pragma-neutrality, integrity hardening, and user-shaped journeys.
 
-Why this differs from Honker's posture:
+Future proof work should stay proportional:
 
-Honker has 7 bindings because Honker's surface is large and
-shape-hostile to raw SQL: queues, streams, locks, rate-limit, tasks,
-fanout; rich state with Job objects, payload deserialization, ack /
-nack semantics, retry config. Per-language wrapping pays off because
-hand-rolling every one of those verbs against the SQL extension is
-real work. Bouncer has four verbs, single-scalar SQL returns, and a
-four-field result struct. The marginal value of a binding is small
-unless the language's stdlib SQLite path is awkward enough to make
-the extension dance the dominant cost. Add bindings selectively, not
-by default.
-
-### DST-forward (deterministic simulation testing)
-
-Honker and its siblings (bouncer-core, future queue/retry/scheduler
-primitives) should be testable under deterministic simulation: every
-source of non-determinism flows through a seam the test harness
-controls, and the entire system is replayable from a seed. Inspired
-by TigerBeetle's VOPR, FoundationDB's simulator, sled's deterministic
-test harness, and Antithesis.
-
-The bar:
-
-- All time is injected. Already true at the `bouncer-core` core
-  (`now_ms` parameter on every function). The wrapper layer must
-  preserve this — production callers see a `Clock` default, tests see
-  whatever the harness wants.
-- All randomness flows through a seeded source. Added per-sibling as
-  needed (none today).
-- All SQLite I/O is interceptable. Needs a VFS shim or rusqlite hook
-  so the harness can inject `SQLITE_BUSY`, `SQLITE_FULL`, partial
-  writes, fsync drops, and torn pages.
-- All operation scheduling is controllable. A generator that produces
-  a sequence of `(operation, conn, args)` with seeded selection, run
-  by a single-threaded scheduler that can permute order across
-  simulated processes.
-- Properties replace scenarios. Invariants like "fencing token never
-  decreases," "no two live owners simultaneously," "released →
-  reclaimable," "expired → takeover succeeds + token++" run across
-  millions of seeds.
-- Bug minimization. When a property fails, the seed reproduces, and a
-  shrinker reduces to the smallest failing trace.
-
-What lives where:
-
-- Bouncer should start with a small local deterministic runner because
-  the core already has the most important seam: explicit `now_ms`.
-- A later shared Honker-family harness can extract the useful pieces
-  once Bouncer proves the shape: clock seam, op generator, scheduler,
-  VFS shim, and property runner.
-- Each sibling (bouncer-core, future queue/retry/scheduler) provides
-  its own operation generator and invariant set.
-- Production code stays unchanged. DST is a test-time superpower, not
-  a runtime cost.
-
-Implications for current decisions:
-
-- The core already has the important seam (`now_ms` on every function).
-- A future wrapper phase may add an injectable clock seam if the
-  deterministic-simulation investment becomes concrete. Phase 002 can
-  stay thinner as long as it does not hide or replace the core's
-  explicit-time contract.
-- Reading time from inside SQLite (e.g. `unixepoch()`) defeats the
-  injection seam and is therefore inconsistent with this direction.
-  Keep all time on the Rust side, behind a `Clock` trait or
-  equivalent.
-
-Out of scope for this proposal:
-
-- Multi-machine simulation. Cinch is single-machine; fencing token +
-  lease semantics are the cross-machine story.
-- Replacing real concurrency tests entirely. DST complements stress
-  tests, doesn't replace them.
-- OS/network-level fault injection. Lives elsewhere if ever needed.
-
-This is a meaningful infrastructure investment, but it should begin
-small. Bouncer should prove the lightweight version first; the family
-can extract a shared simulator only after the local version catches
-real bugs or proves enough value to be worth centralizing.
+- add more targeted multi-connection and boundary stress where it buys
+  confidence
+- consider narrower SQLite fault injection only if specific failure
+  modes are worth pinning
+- avoid turning the roadmap into a commitment to a heavyweight
+  simulator program unless the lightweight proof stack stops being
+  enough
 
 ## V1 nouns
 

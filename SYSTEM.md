@@ -6,7 +6,7 @@ now? It is not consensus, not a workflow engine, and not a distributed
 coordinator. It is a small SQLite state machine with fencing tokens.
 
 `SYSTEM.md` describes the current proved baseline. Future semantic changes
-belong in new `.intent/phases/...` artifacts before the code drifts.
+should be recorded in phase artifacts before the code drifts.
 
 ## Core Contract
 
@@ -119,9 +119,9 @@ The wrapper requires explicit `bootstrap()` and does not create schema state in
 
 `packages/bouncer-py` imports as `bouncer` and uses a PyO3 native module at
 `bouncer._bouncer_native`. The binding calls `bouncer-core` directly for lease
-semantics and returns pure-Python dataclasses for result objects. The SQLite
-extension is a parallel surface for SQL-only callers, not a layer that Python
-wraps.
+semantics and returns pure-Python dataclasses for result objects. It is a thin
+owned-connection convenience layer, not the base interoperability surface for
+Python. The SQLite extension remains the caller-owned connection path.
 
 The public Python package exposes `Bouncer`, `BouncerError`, result dataclasses,
 and `open`. It exposes `bootstrap`, `inspect`, `claim`, `renew`, and `release`
@@ -215,7 +215,8 @@ increase through explicit-time SQL, atomic commit visibility for business write
 plus lease mutation, loud drifted-schema bootstrap failure through wrapper /
 Python / SQL bootstrap, and one direct three-surface journey where Python, SQL,
 and the Rust wrapper observe the same lease state transitions on one database
-file.
+file. Python's role in that proof is mainly convenience and cross-surface
+verification rather than defining the main product boundary.
 
 Contention semantics are primarily proven at the core and extension boundaries.
 The wrappers prove thin delegation, interop, and transaction participation

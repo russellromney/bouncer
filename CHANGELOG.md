@@ -12,7 +12,8 @@ Added:
 - Rust `claim`, `renew`, `release`, and time-aware `inspect` helpers
 - Phase 001 tests for claim, expiry, renew, release, and monotonic fencing behavior
 - first pass of `README.md`, `ROADMAP.md`, and `SYSTEM.md`
-- `.intent/phases/001-core-lease-contract/` with spec, plan, review/decision, and commit-trace artifacts
+- phase artifacts for `001-core-lease-contract` with spec, plan,
+  review/decision, and commit-trace records
 
 Clarified:
 

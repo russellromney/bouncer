@@ -92,14 +92,14 @@ All shipped surfaces share one schema and one lease state machine.
 | SQL extension | caller | any app that already owns the SQLite connection |
 | Rust `Bouncer` | Bouncer | normal Rust apps that want typed results |
 | Rust `BouncerRef` | caller | Rust code that already owns a `rusqlite::Connection` or transaction |
-| Python `bouncer` | Bouncer | Python apps that want a simple binding-owned path |
+| Python `bouncer` | Bouncer | trying Bouncer from Python without hand-loading the extension |
 
 The shortest rule is:
 
 - if **you** already own the SQLite connection, use the **SQL extension**
 - if you are in **Rust** and want a wrapper-owned path, use **`Bouncer`**
 - if you are in **Rust** and already own the connection, use **`BouncerRef`**
-- if you are in **Python** and want a simple owned-connection API, use the
+- if you are in **Python** and just want an easy way to try Bouncer, use the
   **Python binding**
 
 ### SQL extension
@@ -156,8 +156,8 @@ or the current transaction/savepoint boundary.
 
 ### Python binding
 
-Use this when you want a typed Python API and you are happy letting the
-binding own the SQLite connection.
+Use this when you want the easiest way to try Bouncer from Python and
+you are happy letting the binding own the SQLite connection.
 
 ```python
 import bouncer
@@ -177,9 +177,11 @@ See also:
 - [packages/bouncer-py/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/basic_claim.py)
 - [packages/bouncer-py/examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/transactional_claim.py)
 
-This is intentionally **not** the surface for code that already owns a
-`sqlite3.Connection`. In that case, use the SQL extension on the connection
-you already manage.
+This is intentionally **not** the main integration surface for Python.
+It exists as a thin convenience layer and an easy try-it-out path.
+
+If you already own a `sqlite3.Connection`, use the SQL extension on the
+connection you already manage.
 
 ## How do I use it?
 
@@ -231,8 +233,8 @@ with db.transaction() as tx:
 
 If you already own a `sqlite3.Connection` in Python, use the SQL
 extension instead of the Python binding. The Python binding is meant to
-be the easy owned-connection surface, not a second way to drive an
-already-open SQLite handle.
+be the easy try-it-out path, not a second way to drive an already-open
+SQLite handle.
 
 ## How does the transaction story work?
 
@@ -316,6 +318,10 @@ That acceptance layer includes:
 - transaction atomic visibility
 - loud drifted-schema bootstrap failure
 - direct Rust wrapper / SQL extension / Python binding interop
+
+Python is useful here mostly as a convenience/demo layer and as a
+cross-surface proof surface. The core product story is still the SQL
+extension plus the Rust wrapper.
 
 ## Repository map
 

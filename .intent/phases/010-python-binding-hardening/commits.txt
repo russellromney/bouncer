@@ -1,9 +1,0 @@
-# Commits
-
-95f7aa4 Harden Bouncer Python binding
-21b9a30 Address Phase 010 review findings
-
-Verification before `21b9a30`:
-
-- `uv run --group dev pytest packages/bouncer-py/tests`
-- `make test`

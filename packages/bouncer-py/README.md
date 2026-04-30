@@ -1,14 +1,16 @@
 # bouncer Python
 
-Local-development Python binding for Bouncer.
+Local-development Python convenience binding for Bouncer.
 
-This binding is the simple Python path: it opens and owns its own SQLite
-connection, gives you typed result objects, and exposes a transaction
-context manager for atomic business writes plus lease mutations.
+This binding is the easiest way to try Bouncer from Python: it opens
+and owns its own SQLite connection, gives you typed result objects, and
+exposes a transaction context manager for atomic business writes plus
+lease mutations.
 
 That also means it has a clear boundary:
 
-- if you want a straightforward Python API, use this binding
+- if you want a straightforward Python API or a quick way to try the
+  product from Python, use this binding
 - if your code already owns a `sqlite3.Connection`, use the SQL extension
   on that connection instead
 
@@ -54,7 +56,8 @@ syntax errors or multi-statement strings.
 The Python binding owns its own SQLite connection in V1; it does not
 participate in a connection your code already manages. That is
 intentional. We do not want two overlapping Python surfaces for the same
-responsibility.
+responsibility, and the SQL extension is the cleaner long-term
+integration surface for caller-owned Python SQLite connections.
 
 If you already have a `sqlite3.Connection` (or any other Python SQLite
 client), use the `bouncer-extension` SQL loadable extension instead:
