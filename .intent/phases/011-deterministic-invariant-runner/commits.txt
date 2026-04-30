@@ -4,12 +4,22 @@ Phase: 011 — deterministic invariant runner
 
 ## Commits
 
-- No implementation commit has been created for this phase yet.
+- `2fad02b` Plan deterministic Bouncer invariant runner
+- `1dc5b9d` Respond to Phase 011 planning review
+- `5ba6e4d` Land deterministic invariant runner
+- `TBD` Record Phase 011 commit trace
 
 ## Evidence
 
-- No implementation evidence yet.
+- `cargo test -p bouncer-core`
+  Result: 27 core lib tests and 2 invariant tests pass.
+- `make test-rust`
+  Result: Rust wrapper, extension-load, core, and invariant suites pass.
+- `make test`
+  Result: full Rust suite, extension build, editable Python build, and
+  20 Python tests pass.
 
 ## Notes
 
-- Record the implementation commits and evidence after the phase lands.
+- Replace the final `TBD` with the trace-recording commit once it
+  exists.
