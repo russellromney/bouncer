@@ -19,6 +19,18 @@ If the caller already owns a transaction or savepoint on a borrowed
 `rusqlite::Connection`, `BouncerRef` mutators participate in that
 existing boundary instead of attempting a nested transaction.
 
+That split is deliberate:
+
+- `Bouncer`
+  wrapper-owned connection, easiest default for most Rust callers
+- `BouncerRef`
+  caller-owned connection, transaction, or savepoint
+
+If you already have a `rusqlite::Connection` from somewhere else, do not
+open a second wrapper-owned connection just to call Bouncer. Use
+`BouncerRef` on the connection you already have so the lease mutation
+participates in the same SQLite boundary as the rest of your work.
+
 Recommended default surfaces:
 
 - `Bouncer`

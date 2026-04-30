@@ -1,190 +1,343 @@
 # bouncer
 
-Leases and coordination for the Honker stack.
+SQLite leases, ownership, and fencing tokens for single-machine apps.
 
-## Summary
+## What is this?
 
-Bouncer is a small wrapper library for the question:
+Bouncer answers one small question:
 
 Who owns this named resource right now?
 
-For the Honker stack, the point is not distributed consensus or
-multi-node lock choreography. The point is giving a normal SQLite app a
-boring, durable lease / ownership primitive in the same file it already
-uses.
+It gives a normal SQLite application a durable lease primitive in the
+same database file it already uses. That makes it useful for things
+like:
 
-It should feel like a sibling to Knocker:
+- one scheduler should run at a time
+- one background worker should own a shard
+- one importer should hold exclusive ownership while it works
+- one process should be leader for some local responsibility
 
-- `honker` stays the generic SQLite async substrate
-- `bouncer-core` owns Bouncer's schema and SQLite operations
-- `bouncer` bindings stay thin and simple
+Bouncer is not a queue, not a workflow engine, and not distributed
+consensus. It is a small SQLite state machine with expiry and fencing
+tokens.
 
-Bouncer should be the family's lease / fencing / leader-election
-primitive. Over time, Honker itself may depend on it for scheduler
-ownership and other single-machine coordination.
+## Why does it exist?
 
-## What exists today
+Plenty of apps already have the hard part they need: one SQLite file
+shared by a few threads, processes, jobs, or local daemons.
 
-- repo-level docs for current intent and future direction
-- a real `bouncer-core` crate
-- a first Rust wrapper crate in `packages/bouncer`
-- a first SQLite loadable-extension crate in `bouncer-extension`
-- a SQLite schema bootstrap plus Rust `claim` / `renew` / `release` / `inspect`
-- Rust tests that pin the initial lease semantics
-- wrapper tests for explicit bootstrap and wrapper/core interoperability
-- SQL function registration in the core plus SQL/Rust interop tests on one file
-- transactional SQL mutators that can participate in an already-open caller transaction
-- borrowed Rust mutators that can participate in a caller-owned
-  transaction or savepoint without tripping nested transactions
-- sanctioned wrapper-owned Rust transactions for atomic business writes
-  plus lease mutations on one connection
-- a first local-development Python package in `packages/bouncer-py`
-  with explicit bootstrap, lease verbs, and a transaction context manager
-- Python tests proving wrapper-owned transactions and SQL extension
-  interop on the same database file
-- wrapper convenience methods that stay thin and keep explicit-time control in the core
+What they usually do not have is a clean answer to:
 
-## V1 shape
+- "who owns this job runner right now?"
+- "how do I fail over if the owner dies?"
+- "how do I stop a stale actor from continuing work after takeover?"
 
-- named resources
-- claim / renew / release
-- expiry
-- fencing tokens
-- inspect current owner
+The usual alternatives are all annoying in different ways:
 
-## Current SQL surface
+- ad hoc lock tables with fuzzy semantics
+- PID files and temp files
+- hand-rolled "heartbeat" rows
+- dragging in Redis or a bigger coordination system for a local app
 
-The first SQLite-facing surface now exists via `bouncer-extension`:
+Bouncer exists to make that boring.
 
-- `bouncer_bootstrap()`
-- `bouncer_claim(name, owner, ttl_ms, now_ms)`
-- `bouncer_renew(name, owner, ttl_ms, now_ms)`
-- `bouncer_release(name, owner, now_ms)`
-- `bouncer_owner(name, now_ms)`
-- `bouncer_token(name)`
+## Why would I use it?
 
-The SQL surface stays explicit about time. Higher-level bindings can
-offer convenience clocks later, but the SQLite-facing contract should
-not hide `now_ms` inside the extension.
+Use Bouncer when:
 
-Mutating SQL helpers can also participate in a caller-owned explicit
-transaction, so a business write and a Bouncer lease mutation can commit
-or roll back together on one connection.
+- you already use SQLite
+- you want one durable owner of a named resource
+- expiry and takeover should be explicit
+- stale-actor protection matters
+- you want to keep coordination in the same file as the rest of the app
 
-## Choosing a surface
+Do not use Bouncer when:
 
-Three caller surfaces share one Bouncer-owned schema and lease
-semantics. Pick the one that matches how you already use SQLite. All
-three operate on the same `bouncer_resources` table and can coexist on
-one database file.
+- you need cross-machine consensus
+- you need fairness or waiting queues
+- you need a job system rather than a lease primitive
+- you want Bouncer to enforce downstream stale-write rejection by itself
 
-**SQL extension** — for any SQLite client that wants Bouncer
-semantics on a connection it already owns. Load
-`libbouncer_ext.{dylib,so,dll}` and call the `bouncer_*` SQL functions:
+## Design at a glance
+
+Bouncer stores lease state in one table: `bouncer_resources`.
+
+Each resource has:
+
+- `name`
+- `owner`
+- `token`
+- `lease_expires_at_ms`
+
+The important rules are:
+
+- the first successful claim creates the row
+- a live lease blocks a second claim
+- release and expiry clear live ownership
+- reclaim after release or expiry increments the fencing token
+- tokens never go backwards
+
+That last part matters. The token is how you protect downstream systems
+from stale actors. If worker A loses the lease and worker B takes over,
+worker B gets a larger token. Your downstream side-effect boundary has
+to carry and compare that token if you want stale writes rejected
+outside SQLite.
+
+## Surfaces
+
+All shipped surfaces share one schema and one lease state machine.
+
+| Surface | Who owns the SQLite connection? | Best for |
+|---|---|---|
+| SQL extension | caller | any app that already owns the SQLite connection |
+| Rust `Bouncer` | Bouncer | normal Rust apps that want typed results |
+| Rust `BouncerRef` | caller | Rust code that already owns a `rusqlite::Connection` or transaction |
+| Python `bouncer` | Bouncer | Python apps that want a simple binding-owned path |
+
+The shortest rule is:
+
+- if **you** already own the SQLite connection, use the **SQL extension**
+- if you are in **Rust** and want a wrapper-owned path, use **`Bouncer`**
+- if you are in **Rust** and already own the connection, use **`BouncerRef`**
+- if you are in **Python** and want a simple owned-connection API, use the
+  **Python binding**
+
+### SQL extension
+
+Use this when you already own the SQLite connection and want Bouncer to
+participate on that exact connection.
 
 ```sql
 SELECT bouncer_bootstrap();
 SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
 SELECT bouncer_owner('scheduler', 1700000000000);
+SELECT bouncer_token('scheduler');
 ```
 
-**Python binding** — for Python callers who want a typed,
-binding-owned SQLite connection:
+The SQL surface keeps time explicit. You pass `now_ms` yourself.
+
+See also:
+
+- [bouncer-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.sql)
+- [bouncer-extension/examples/transactional_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/transactional_claim.sql)
+
+### Rust wrapper
+
+Use this when you are writing Rust and want typed results plus a
+sanctioned transaction/savepoint surface.
+
+```rust
+use std::time::Duration;
+
+use bouncer::{Bouncer, ClaimResult};
+
+let db = Bouncer::open("app.sqlite3")?;
+db.bootstrap()?;
+
+match db.claim("scheduler", "worker-a", Duration::from_secs(30))? {
+    ClaimResult::Acquired(lease) => {
+        println!("got token {}", lease.token);
+    }
+    ClaimResult::Busy(current) => {
+        println!("currently owned by {}", current.owner);
+    }
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+See also:
+
+- [packages/bouncer/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/basic_claim.rs)
+- [packages/bouncer/examples/transactional_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/transactional_claim.rs)
+
+`Bouncer` is the default Rust surface. `BouncerRef` is the lower-level
+integration surface when your code already owns the `rusqlite::Connection`
+or the current transaction/savepoint boundary.
+
+### Python binding
+
+Use this when you want a typed Python API and you are happy letting the
+binding own the SQLite connection.
 
 ```python
 import bouncer
+
 db = bouncer.open("app.sqlite3")
 db.bootstrap()
+
 result = db.claim("scheduler", "worker-a", ttl_ms=30_000)
+if result.acquired:
+    print(result.lease.token)
+else:
+    print(result.current.owner)
 ```
 
-**Rust wrapper** — for Rust callers, with a sanctioned transaction
-handle and savepoint surface:
+See also:
+
+- [packages/bouncer-py/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/basic_claim.py)
+- [packages/bouncer-py/examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/transactional_claim.py)
+
+This is intentionally **not** the surface for code that already owns a
+`sqlite3.Connection`. In that case, use the SQL extension on the connection
+you already manage.
+
+## How do I use it?
+
+The happy path is:
+
+1. open the database
+2. call `bootstrap()` once per file
+3. claim a named resource with an owner and TTL
+4. renew while the owner is still alive
+5. release when the owner is done
+6. on takeover, use the new fencing token downstream
+
+If your app needs one business write plus one lease mutation to commit
+or roll back together, use a caller-owned transaction boundary.
+
+Rust wrapper example:
 
 ```rust
-let mut db = bouncer::Bouncer::open("app.sqlite3")?;
+use std::time::Duration;
+
+use bouncer::{Bouncer, ClaimResult};
+use rusqlite::params;
+
+let mut db = Bouncer::open("app.sqlite3")?;
 db.bootstrap()?;
+
 let tx = db.transaction()?;
-tx.claim("scheduler", "worker-a", Duration::from_secs(30))?;
-tx.commit()?;
+tx.conn().execute(
+    "INSERT INTO jobs(payload) VALUES (?1)",
+    params!["work"],
+)?;
+
+match tx.claim("scheduler", "worker-a", Duration::from_secs(30))? {
+    ClaimResult::Acquired(_) => tx.commit()?,
+    ClaimResult::Busy(_) => tx.rollback()?,
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+Python binding example:
+
+```python
+with db.transaction() as tx:
+    tx.execute("INSERT INTO jobs(payload) VALUES (?)", ["work"])
+    claim = tx.claim("scheduler", "worker-a", ttl_ms=30_000)
+    if not claim.acquired:
+        tx.rollback()
+```
+
+If you already own a `sqlite3.Connection` in Python, use the SQL
+extension instead of the Python binding. The Python binding is meant to
+be the easy owned-connection surface, not a second way to drive an
+already-open SQLite handle.
+
+## How does the transaction story work?
+
+There are two modes:
+
+- **autocommit mutators**
+  Bouncer owns the transaction and opens `BEGIN IMMEDIATE`
+- **caller-owned transaction or savepoint**
+  Bouncer reuses the boundary you already opened
+
+That means Bouncer does not invent a separate transaction model.
+
+The main practical implication is that deferred `BEGIN` and
+`BEGIN IMMEDIATE` are different:
+
+- `BEGIN IMMEDIATE` takes writer intent up front
+- deferred `BEGIN` can fail later during lock upgrade
+
+So if you need predictable atomic business-write-plus-lease behavior,
+open the outer transaction with `BEGIN IMMEDIATE`.
 
 ## Safety rails
 
-These are the sharp edges most likely to matter in practice.
+These are the sharp edges worth remembering.
 
-**Lease busy is not SQLite busy/locked.**
-When another owner already holds a live lease, Bouncer returns `Busy`
-(`ClaimResult::Busy`, SQL `NULL`, or Python `acquired=False`). That is a
-*lease semantic*, not a lock failure. SQLite `BUSY` / `LOCKED` means
-writer contention or a deferred transaction that failed to upgrade.
+### Lease busy is not SQLite busy/locked
 
-**Bouncer does not own your pragma policy.**
-`journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`, and
-`foreign_keys` survive bootstrap and lease operations unchanged. Set
-them before you call `bootstrap()`, or on the connection you hand to
-`BouncerRef`. The wrapper and SQL extension do not normalize them.
+If another owner already holds a live lease, Bouncer returns a lease
+busy result:
 
-**When to use `BEGIN IMMEDIATE`.**
-If you need up-front writer intent — for example, to guarantee that a
-business write and a lease mutation commit or roll back atomically —
-open the outer transaction with `BEGIN IMMEDIATE`. Bouncer autocommit
-mutators already do this internally; caller-owned transactions follow
-their outer mode. Deferred `BEGIN` defers lock upgrade and can surface
-SQLite busy under contention instead of lease busy.
+- Rust: `ClaimResult::Busy`
+- Python: `acquired=False`
+- SQL: `NULL` from `bouncer_claim(...)`
 
-**Fencing tokens are Bouncer's responsibility; carrying them is yours.**
-Bouncer guarantees monotonic fencing tokens across claim, expiry,
-release, and reclaim. Downstream systems must carry the token across
-their external side-effect boundary and reject work whose token is
-stale. Bouncer cannot enforce that outside SQLite.
+That is different from SQLite `BUSY` / `LOCKED`, which means writer
+contention or deferred lock-upgrade failure.
 
-**Bootstrap rejects drifted schema.**
-If a `bouncer_resources` table already exists with a different shape,
-bootstrap fails with `SchemaMismatch` rather than silently accepting it.
-This is not a migration engine. Fix the table or start with a fresh file.
+### Bouncer is pragma-neutral
 
-## Non-goals
+Bouncer does not set or normalize your connection policy. The current
+proved set is:
 
-- distributed consensus
-- waiting queues
-- fairness
-- elaborate leader election
+- `journal_mode`
+- `synchronous`
+- `busy_timeout`
+- `locking_mode`
+- `foreign_keys`
 
-## Intent
+Set them yourself before calling `bootstrap()` or before handing a
+connection to `BouncerRef`.
 
-Bouncer exists for the single-machine SQLite stack:
+### Bootstrap is strict
 
-- app processes on one host
-- one SQLite file
-- background workers, schedulers, migrations, importers
-- no Redis, Consul, ZooKeeper, or etcd just to answer "who owns this?"
+If `bouncer_resources` already exists with the wrong shape, bootstrap
+fails loudly with `SchemaMismatch`. Bouncer is not a migration engine
+and does not silently accept drifted schema.
 
-If it cannot make that use case materially simpler, it should stay a
-small internal primitive rather than grow into a bigger product.
+### Fencing tokens matter only if you carry them
 
-## Intent artifacts
+Bouncer guarantees monotonic tokens. It cannot make your downstream
+systems check them for you. If stale-actor protection matters beyond
+SQLite, carry the token to the place where side effects happen.
 
-- `SYSTEM.md`
-  current English model of the system
-- `ROADMAP.md`
-  remaining product and implementation work
-- `CHANGELOG.md`
-  completed work summary
-- `.intent/phases/.../spec-diff.md`
-  intended semantic change for one phase
-- `.intent/phases/.../plan.md`
-  implementation reasoning for one phase
-- `.intent/phases/.../reviews_and_decisions.md`
-  review history plus explicit responses for one phase
+## Current proof
 
-## Repo shape
+The repo now has direct proof for:
 
-- `bouncer-core`
-  Rust core that owns schema and SQLite operations
-- `bouncer-extension`
-  SQLite loadable extension / shared SQL surface
-- `packages/bouncer`
-  thin Rust binding surface
-- `packages/bouncer-py`
-  thin Python binding surface
+- core lease semantics
+- deterministic invariant coverage
+- SQLite busy/locked versus lease-busy behavior
+- strict schema-drift rejection and invalid-row hardening
+- pragma-neutrality across the main public surfaces
+- user-shaped acceptance journeys on one real database file
+
+That acceptance layer includes:
+
+- fresh bootstrap + first claim
+- independent second caller busy
+- release/reclaim token increase
+- deterministic expiry/reclaim token increase
+- transaction atomic visibility
+- loud drifted-schema bootstrap failure
+- direct Rust wrapper / SQL extension / Python binding interop
+
+## Repository map
+
+- [bouncer-core](/Users/russellromney/Documents/Github/bouncer/bouncer-core)
+  Rust core owning schema and lease semantics
+- [bouncer-extension](/Users/russellromney/Documents/Github/bouncer/bouncer-extension)
+  SQLite loadable extension
+- [packages/bouncer](/Users/russellromney/Documents/Github/bouncer/packages/bouncer)
+  Rust wrapper
+- [packages/bouncer-py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py)
+  Python binding
+
+## Development
+
+```bash
+make test-rust
+make test-python
+make test
+```
+
+## Honker
+
+Bouncer started in the Honker family, but the primitive itself is more
+general than that origin story. If you have a single-machine SQLite app
+and need durable ownership with fencing, it stands on its own.

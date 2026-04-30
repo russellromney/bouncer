@@ -2,6 +2,12 @@
 
 SQLite loadable extension for Bouncer.
 
+This is the connection-owned surface.
+
+Use it when your app already has a SQLite connection and you want
+Bouncer to participate on that exact connection instead of opening a new
+wrapper-owned one.
+
 Builds `libbouncer_ext.dylib` / `.so` for your platform and exposes the
 first `bouncer_*` SQL helpers:
 
@@ -14,6 +20,13 @@ first `bouncer_*` SQL helpers:
 
 The SQL surface stays explicit about time. It reuses `bouncer-core`
 for schema and lease semantics rather than reimplementing them in SQL.
+
+This makes the extension the right boundary for:
+
+- raw SQLite clients
+- apps that already own a connection in Python, Go, Ruby, etc.
+- cross-language interop on one database file
+- business writes plus lease mutations in one caller-owned transaction
 
 ## Loading the extension
 
