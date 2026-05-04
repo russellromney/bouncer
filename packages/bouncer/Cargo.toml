@@ -2,8 +2,11 @@
 name = "bouncer"
 version = "0.1.0"
 edition = "2021"
-description = "Thin Rust binding for Bouncer, a SQLite lease and coordination library."
+description = "Rust wrapper for Bouncer, a SQLite lease primitive with expiry and fencing tokens."
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["sqlite", "lease", "fencing", "coordination", "lock"]
+categories = ["database", "concurrency"]
 
 [dependencies]
 bouncer-core = { path = "../../bouncer-core" }

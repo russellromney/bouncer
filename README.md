@@ -38,6 +38,7 @@ From the repo root:
 ```bash
 make test-rust
 make build-ext
+make smoke-ext
 ```
 
 If you want the quickest hands-on path, start with:
@@ -60,12 +61,28 @@ Today the cleanest way to use Bouncer is still from source.
 From the repo root, the extension build is:
 
 ```bash
-cargo build -p bouncer-extension --release
+make build-ext
 ```
 
-The output artifact will be under `target/release/`. Tagged GitHub
-releases also build and attach prebuilt extension binaries for the main
-platforms.
+That builds the local artifact under `target/release/`.
+
+If you want a release-shaped file plus checksum staged locally:
+
+```bash
+make dist-ext
+```
+
+That produces a current-platform asset in `dist/` with a stable name
+like:
+
+- `bouncer-extension-linux-x86_64.so`
+- `bouncer-extension-macos-arm64.dylib`
+- `bouncer-extension-windows-x86_64.dll`
+
+and a matching `.sha256` file beside it.
+
+Tagged GitHub releases also attach those same platform-specific assets
+plus their checksum files.
 
 ## Why does it exist?
 
@@ -224,7 +241,9 @@ import sqlite3
 
 conn = sqlite3.connect("app.sqlite3")
 conn.enable_load_extension(True)
-conn.load_extension("target/release/libbouncer_ext")
+# Load the exact asset you built or downloaded.
+# Example: dist/bouncer-extension-macos-arm64.dylib
+conn.load_extension("dist/bouncer-extension-macos-arm64.dylib")
 
 conn.execute("SELECT bouncer_bootstrap()")
 token = conn.execute(
@@ -387,14 +406,17 @@ API.
 The repo now has direct proof for core lease semantics, deterministic
 invariant coverage, SQLite busy/locked versus lease-busy behavior,
 strict schema-drift rejection and invalid-row hardening,
-pragma-neutrality across the main public surfaces, and user-shaped
-acceptance journeys on one real database file.
+pragma-neutrality across the main public surfaces, narrative
+user-shaped acceptance journeys, and a heavier repeated public-surface
+stress layer on one real database file.
 
 That acceptance layer includes fresh bootstrap plus first claim,
 independent second-caller busy, release/reclaim token increase,
 deterministic expiry/reclaim token increase, transaction atomic
-visibility, loud drifted-schema bootstrap failure, and direct Rust
-wrapper / SQL extension cross-surface visibility.
+visibility, loud drifted-schema bootstrap failure, direct Rust
+wrapper / SQL extension cross-surface visibility, and repeated wrapper
+/ SQL stress rows that hammer claim, busy, renew, release, reclaim,
+expiry handoff, and caller-owned transaction participation.
 
 ## Repository map
 
@@ -409,6 +431,7 @@ wrapper / SQL extension cross-surface visibility.
 
 ```bash
 make test-rust
+make smoke-ext
 make test
 ```
 

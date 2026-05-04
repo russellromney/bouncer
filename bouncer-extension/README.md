@@ -33,7 +33,7 @@ This makes the extension the right boundary for:
 From the repo root:
 
 ```bash
-cargo build -p bouncer-extension --release
+make build-ext
 ```
 
 That produces:
@@ -42,8 +42,20 @@ That produces:
 - Linux: `target/release/libbouncer_ext.so`
 - Windows: `target/release/bouncer_ext.dll`
 
+If you want a release-shaped asset staged locally with a checksum file:
+
+```bash
+make dist-ext
+```
+
+That stages a current-platform file in `dist/` with a stable release
+name like `bouncer-extension-macos-arm64.dylib` plus a matching
+`.sha256`.
+
 The repo also includes a GitHub Actions workflow that builds these
-artifacts for tagged releases and uploads them as release assets.
+artifacts for tagged releases, renames them into those stable
+platform-specific asset names, and uploads both the asset and its
+checksum file.
 
 ## Loading the extension
 
@@ -78,7 +90,9 @@ import sqlite3
 
 conn = sqlite3.connect("app.sqlite3")
 conn.enable_load_extension(True)
-conn.load_extension("target/release/libbouncer_ext")
+# Load the exact asset you built or downloaded.
+# Example: dist/bouncer-extension-macos-arm64.dylib
+conn.load_extension("dist/bouncer-extension-macos-arm64.dylib")
 conn.execute("SELECT bouncer_bootstrap()")
 ```
 
@@ -86,6 +100,17 @@ See also:
 
 - [examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.py)
 - [examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/transactional_claim.py)
+
+## Smoke proof
+
+From the repo root:
+
+```bash
+make smoke-ext
+```
+
+That builds the release artifact and runs a real load-and-call smoke
+path against it through a public caller boundary.
 
 ## Transaction model
 

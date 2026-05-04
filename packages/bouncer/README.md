@@ -1,50 +1,42 @@
-# bouncer package
+# bouncer crate
 
-Thin Rust binding for `bouncer-core`.
+Rust wrapper for Bouncer.
 
-This crate is the friendly wrapper layer:
+Bouncer is a SQLite lease primitive with expiry and fencing tokens. This
+crate is the Rust convenience layer on top of that shared lease state
+machine.
 
-- `bouncer-core` keeps the explicit-time core contract
-- `bouncer` opens a SQLite database, bootstraps the schema explicitly,
-  and exposes the four lease verbs with normal `Duration` inputs
+Use this crate when:
 
-It does not:
+- you are already in Rust
+- you want typed results
+- you want a sanctioned transaction/savepoint surface
 
-- reimplement lease semantics
-- invent a second state machine
-- hide SQLite connection policy
-- use wall clock as an ordering primitive
+Do not use this crate to invent a second SQLite story. If you already
+own the `rusqlite::Connection`, use `BouncerRef` on that connection so
+the lease mutation participates in the same SQLite boundary as the rest
+of your work.
 
-If the caller already owns a transaction or savepoint on a borrowed
-`rusqlite::Connection`, `BouncerRef` mutators participate in that
-existing boundary instead of attempting a nested transaction.
-
-That split is deliberate:
+## Surfaces
 
 - `Bouncer`
   wrapper-owned connection, easiest default for most Rust callers
-- `BouncerRef`
-  caller-owned connection, transaction, or savepoint
-
-If you already have a `rusqlite::Connection` from somewhere else, do not
-open a second wrapper-owned connection just to call Bouncer. Use
-`BouncerRef` on the connection you already have so the lease mutation
-participates in the same SQLite boundary as the rest of your work.
-
-Recommended default surfaces:
-
-- `Bouncer`
-  Use for simple autocommit lease operations on one wrapper-owned
-  connection.
 - `Bouncer::transaction()`
-  Use when a business write and one or more lease mutations should live
-  in one sanctioned `BEGIN IMMEDIATE` boundary.
+  sanctioned `BEGIN IMMEDIATE` path for business writes plus lease
+  mutations in one atomic boundary
 - `BouncerRef`
-  Use when the caller already owns the SQLite connection or its current
-  transaction/savepoint state and wants Bouncer to participate honestly
-  in that lower-level boundary.
+  caller-owned `rusqlite::Connection`, transaction, or savepoint
 
-Example:
+The wrapper does not:
+
+- reimplement lease semantics
+- hide pragma policy
+- use wall clock as an ordering primitive
+
+Wall clock in this crate is only for expiry bookkeeping. The underlying
+lease contract still comes from `bouncer-core`.
+
+## Example
 
 ```rust
 use std::time::Duration;
@@ -65,15 +57,7 @@ match db.claim("scheduler", "worker-a", Duration::from_secs(30))? {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-If multiple processes or connections will touch the same database file,
-configure those connections first, then call `bootstrap()`. In practice
-that usually means `journal_mode=WAL` plus a non-zero `busy_timeout`.
-The wrapper stays pragma-neutral on purpose.
-
-To combine a business write and a lease mutation atomically, open a
-transaction handle. `wrapper.transaction()` takes `&mut self`, so the
-borrow checker prevents a second open transaction or a stray
-autocommit call on the same `Bouncer` while one is alive.
+## Atomic business write + lease mutation
 
 ```rust
 use std::time::Duration;
@@ -89,6 +73,7 @@ tx.conn().execute(
     "INSERT INTO jobs(payload) VALUES (?1)",
     params!["work"],
 )?;
+
 match tx.claim("scheduler", "worker-a", Duration::from_secs(30))? {
     ClaimResult::Acquired(_) => tx.commit()?,
     ClaimResult::Busy(_) => tx.rollback()?,
@@ -96,23 +81,16 @@ match tx.claim("scheduler", "worker-a", Duration::from_secs(30))? {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`tx.conn()` returns the underlying `rusqlite::Connection` for prepared
-statements and business writes inside the same atomic boundary. Don't
-issue `BEGIN` / `COMMIT` / `ROLLBACK` through it — call the handle's
-`commit()` / `rollback()` (or drop the handle to roll back).
+`tx.conn()` gives you the underlying `rusqlite::Connection` for
+business writes inside the same atomic boundary. Use the handle's
+`commit()` / `rollback()` to finish the transaction.
 
-If you need a nested boundary inside that transaction, open a wrapper
-savepoint from the handle:
+If you need a nested rollback boundary, use `tx.savepoint()`.
 
-```rust
-let mut tx = db.transaction()?;
-let sp = tx.savepoint()?;
-// lease mutations and business writes through `sp`
-sp.commit()?;
-tx.commit()?;
-# Ok::<(), Box<dyn std::error::Error>>(())
-```
+## Notes
 
-If you need deterministic time control for tests or simulation work,
-drop down to `bouncer-core`, where the core contract still takes
-explicit `now_ms` / `ttl_ms` values.
+- Call `bootstrap()` explicitly. `open(path)` does not create schema.
+- Configure your SQLite connection policy yourself. The wrapper is
+  pragma-neutral.
+- If you need explicit `now_ms` control for tests or simulation, drop
+  down to `bouncer-core`.

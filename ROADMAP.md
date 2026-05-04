@@ -21,7 +21,8 @@ the app already uses.
 Bouncer now has a real shipped baseline: core lease semantics, a SQLite
 extension surface, a Rust wrapper, and a layered proof
 stack that covers semantics, SQLite behavior, integrity hardening,
-pragma-neutrality, and user-shaped acceptance.
+pragma-neutrality, user-shaped acceptance, release-shaped extension
+smoke proof, and repeated public-surface stress.
 
 `SYSTEM.md` is the current English model of that baseline.
 `CHANGELOG.md` is the detailed record of what has landed so far.
@@ -37,21 +38,18 @@ The intended product model is:
 
 ## Next build steps
 
-The next Bouncer work should focus on surface clarity and correctness,
-not on expanding footprint.
+The next Bouncer work should stay small and user-driven, not footprint
+driven.
 
-1. **Cross-surface boundary polish.**
-   Keep making the SQL extension feel like the base interoperability
-   surface and the Rust wrapper feel like a convenience layer rather
-   than a competing product. Python should stay on the SQL extension
-   path through examples and docs, not a second package surface.
-2. **Targeted stress hardening.**
-   Add more narrow proof where it buys confidence, especially around
-   multi-connection behavior, without committing to a full deterministic
-   simulator program unless real bugs justify that investment.
-3. **Distribution and release polish.**
-   Make the extension easier to build, ship, and consume from normal
-   SQLite clients without widening the product surface.
+1. **Consumer-driven polish.**
+   Only add surface or ergonomics work when a real app pushes on a real
+   rough edge.
+2. **Distribution follow-through.**
+   If people actually adopt the extension path, make the release and
+   install story nicer without widening the product surface.
+3. **Targeted maintenance proof.**
+   Add more proof only when a concrete scary area or real bug justifies
+   it.
 
 ## Future proposals
 

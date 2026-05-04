@@ -9,6 +9,34 @@ Changed:
 - Python usage is now documented through stdlib `sqlite3` plus the
   SQLite extension examples instead of a separate package API
 
+### Phase 016 — distribution and public stress
+
+Added:
+
+- local distribution commands:
+  - `make build-ext`
+  - `make dist-ext`
+  - `make smoke-ext`
+- portable helper scripts for staging release-shaped extension assets
+  and `.sha256` files
+- release workflow checksum generation and upload for extension assets
+- a release-built shared-library smoke test in
+  `packages/bouncer/tests/extension_load.rs`
+- `packages/bouncer/tests/public_stress.rs`, a repeated public-surface
+  stress suite over wrapper and SQL boundaries
+
+Changed:
+
+- extension release assets now use stable platform-specific names like
+  `bouncer-extension-linux-x86_64.so` and ship matching `.sha256` files
+- release/install docs now show the real build, stage, and smoke path
+  rather than only crate-local build steps
+
+Clarified:
+
+- this phase widens proof and improves distribution, not lease or
+  schema semantics
+
 ### Phase 001 — core lease contract
 
 Added:

@@ -14,15 +14,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             artifact_name: libbouncer_ext.so
-            asset_name: libbouncer_ext-linux-x86_64.so
-          - os: macos-latest
+            asset_name: bouncer-extension-linux-x86_64.so
+          - os: macos-14
             artifact_name: libbouncer_ext.dylib
-            asset_name: libbouncer_ext-macos-arm64.dylib
-          - os: windows-latest
+            asset_name: bouncer-extension-macos-arm64.dylib
+          - os: windows-2022
             artifact_name: bouncer_ext.dll
-            asset_name: bouncer_ext-windows-x86_64.dll
+            asset_name: bouncer-extension-windows-x86_64.dll
 
     steps:
       - uses: actions/checkout@v4
@@ -38,15 +38,22 @@ jobs:
         run: |
           mkdir -p dist
           cp "target/release/${{ matrix.artifact_name }}" "dist/${{ matrix.asset_name }}"
+          ./scripts/write_sha256.sh \
+            "dist/${{ matrix.asset_name }}" \
+            "dist/${{ matrix.asset_name }}.sha256"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: dist/${{ matrix.asset_name }}
+          path: |
+            dist/${{ matrix.asset_name }}
+            dist/${{ matrix.asset_name }}.sha256
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ matrix.asset_name }}
+          files: |
+            dist/${{ matrix.asset_name }}
+            dist/${{ matrix.asset_name }}.sha256

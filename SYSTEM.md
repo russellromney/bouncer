@@ -178,6 +178,12 @@ mutators, and typed savepoints.
 Rust tests also build and load the `bouncer-extension` cdylib through rusqlite
 and exercise every `bouncer_*` function.
 
+The extension also now has a release-shaped smoke path. The Rust test
+suite proves that the release-built shared library under
+`target/release/` can be loaded through a normal public caller boundary
+and can run the full bootstrap / claim / busy / renew / token / release
+smoke lifecycle without extra binding-specific glue.
+
 There is also now a small public-surface acceptance layer. The Rust
 acceptance tests prove fresh bootstrap plus first claim, independent
 second-caller busy, release/reclaim token increase, deterministic
@@ -186,6 +192,12 @@ visibility for business write plus lease mutation, loud drifted-schema
 bootstrap failure through wrapper and SQL bootstrap, and direct Rust
 wrapper / SQL extension cross-surface state visibility on one database
 file.
+
+On top of that, there is now a repeated public-surface stress layer.
+Those tests stay on file-backed wrapper / SQL surfaces and repeatedly
+exercise claim, busy second caller, renew, release, reclaim after
+release, explicit-time reclaim after expiry, cross-surface visibility,
+and caller-owned transaction visibility.
 
 Contention semantics are primarily proven at the core and extension boundaries.
 The wrappers prove thin delegation, interop, and transaction participation
@@ -201,3 +213,7 @@ Language-specific wrappers should only exist when they provide a
 meaningfully better local experience than driving the extension
 directly. Package registry publishing is not part of the current
 baseline.
+
+Release artifacts now use stable platform-specific names plus `.sha256`
+files. The local repo commands for that path are `make build-ext`,
+`make dist-ext`, and `make smoke-ext`.

@@ -7,10 +7,21 @@ use rusqlite::Connection;
 
 #[test]
 fn loadable_extension_registers_all_bouncer_functions() -> rusqlite::Result<()> {
-    let artifact = build_extension_artifact();
+    let artifact = build_extension_artifact(BuildProfile::Debug);
     let conn = Connection::open_in_memory()?;
     load_extension(&conn, &artifact)?;
+    assert_full_smoke_path(&conn)
+}
 
+#[test]
+fn release_extension_artifact_loads_full_smoke_path() -> rusqlite::Result<()> {
+    let artifact = build_extension_artifact(BuildProfile::Release);
+    let conn = Connection::open_in_memory()?;
+    load_extension(&conn, &artifact)?;
+    assert_full_smoke_path(&conn)
+}
+
+fn assert_full_smoke_path(conn: &Connection) -> rusqlite::Result<()> {
     let bootstrapped: i64 = conn.query_row("SELECT bouncer_bootstrap()", [], |row| row.get(0))?;
     assert_eq!(bootstrapped, 1);
 
@@ -63,19 +74,47 @@ fn loadable_extension_registers_all_bouncer_functions() -> rusqlite::Result<()> 
     Ok(())
 }
 
-fn build_extension_artifact() -> PathBuf {
+#[derive(Clone, Copy)]
+enum BuildProfile {
+    Debug,
+    Release,
+}
+
+impl BuildProfile {
+    fn as_str(self) -> &'static str {
+        match self {
+            BuildProfile::Debug => "debug",
+            BuildProfile::Release => "release",
+        }
+    }
+}
+
+fn build_extension_artifact(profile: BuildProfile) -> PathBuf {
     let repo_root = repo_root();
-    let status = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
+    let mut command = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()));
+    command
         .arg("build")
         .arg("-p")
-        .arg("bouncer-extension")
+        .arg("bouncer-extension");
+    if matches!(profile, BuildProfile::Release) {
+        command.arg("--release");
+    }
+    let status = command
         .current_dir(&repo_root)
         .status()
         .expect("run cargo build for bouncer-extension");
-    assert!(status.success(), "cargo build -p bouncer-extension failed");
+    assert!(
+        status.success(),
+        "cargo build -p bouncer-extension{} failed",
+        if matches!(profile, BuildProfile::Release) {
+            " --release"
+        } else {
+            ""
+        }
+    );
 
     let artifact = target_dir(&repo_root)
-        .join("debug")
+        .join(profile.as_str())
         .join(format!("{DLL_PREFIX}bouncer_ext{DLL_SUFFIX}"));
     assert!(
         artifact.exists(),
