@@ -1,3 +1,35 @@
+//! Rust wrapper for Bouncer.
+//!
+//! Bouncer is a SQLite lease primitive with expiry and fencing tokens.
+//! This crate is the typed Rust layer on top of that shared lease state
+//! machine.
+//!
+//! Use [`Bouncer`] when you want the wrapper to own the connection.
+//! Use [`BouncerRef`] when you already own the `rusqlite::Connection`
+//! or current transaction boundary and want Bouncer to participate on
+//! that exact SQLite handle.
+//!
+//! # Example
+//!
+//! ```rust
+//! use std::time::Duration;
+//!
+//! use bouncer::{Bouncer, ClaimResult};
+//!
+//! let db = Bouncer::open("app.sqlite3")?;
+//! db.bootstrap()?;
+//!
+//! match db.claim("scheduler", "worker-a", Duration::from_secs(30))? {
+//!     ClaimResult::Acquired(lease) => {
+//!         println!("got token {}", lease.token);
+//!     }
+//!     ClaimResult::Busy(current) => {
+//!         println!("currently owned by {}", current.owner);
+//!     }
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

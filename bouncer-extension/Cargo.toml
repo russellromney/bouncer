@@ -5,6 +5,9 @@ edition = "2021"
 description = "SQLite loadable extension for Bouncer. Adds bouncer_* lease functions to any SQLite client."
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/russellromney/bouncer"
+homepage = "https://github.com/russellromney/bouncer"
+documentation = "https://docs.rs/bouncer-extension"
 keywords = ["sqlite", "lease", "lock", "coordination", "bouncer"]
 categories = ["database", "concurrency"]
 
