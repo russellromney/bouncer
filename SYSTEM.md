@@ -1,6 +1,6 @@
-# Bouncer System
+# Litelease System
 
-Bouncer is a single-machine SQLite lease and ownership primitive for
+Litelease is a single-machine SQLite lease and ownership primitive for
 SQLite apps. It answers one question: who owns this named resource right
 now? It is not consensus, not a workflow engine, and not a distributed
 coordinator. It is a small SQLite state machine with fencing tokens.
@@ -27,7 +27,7 @@ current live owner.
 
 The core keeps time explicit through `now_ms`. Time is used for lease expiry
 bookkeeping, not as an ordering primitive. Stale-actor safety flows through
-SQLite writer serialization plus fencing tokens. Bouncer can provide the token;
+SQLite writer serialization plus fencing tokens. Litelease can provide the token;
 downstream systems must carry and compare it at their external side-effect
 boundary if they want stale-actor protection outside SQLite.
 
@@ -80,7 +80,7 @@ mode.
 When a `bouncer_*` SQL function hits an underlying SQLite lock failure,
 SQLite/rusqlite can collapse some UDF callback lock failures to a generic
 `SQLITE_ERROR` while preserving only busy/locked text. Outside that known
-scalar-function boundary quirk, Bouncer preserves the native SQLite
+scalar-function boundary quirk, Litelease preserves the native SQLite
 `BUSY` / `LOCKED` error rather than turning it into a separate lease
 semantic.
 
@@ -169,7 +169,7 @@ typed `Savepoint` commit participates in the outer transaction boundary, and
 wrapper autocommit lease-busy behavior stays stable under `journal_mode = WAL`.
 
 The core and wrapper also now have file-backed pragma-neutrality matrices.
-They prove Bouncer does not rewrite the pinned caller-owned pragma set
+They prove Litelease does not rewrite the pinned caller-owned pragma set
 (`journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`,
 `foreign_keys`) across core bootstrap/mutators, SQL function registration and
 calls, wrapper bootstrap, borrowed-path mutators, wrapper-owned transaction
@@ -205,7 +205,7 @@ rather than a separate concurrency model.
 
 ## Boundaries
 
-Bouncer is the lease/coordination primitive. It is intentionally much
+Litelease is the lease/coordination primitive. It is intentionally much
 smaller than a queue, scheduler, or workflow system.
 
 The SQLite extension is the main caller-owned connection surface.

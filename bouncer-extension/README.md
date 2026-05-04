@@ -1,11 +1,11 @@
 # bouncer-extension
 
-SQLite loadable extension for Bouncer.
+SQLite loadable extension for Litelease.
 
 This is the connection-owned surface.
 
 Use it when your app already has a SQLite connection and you want
-Bouncer to participate on that exact connection instead of opening a new
+Litelease to participate on that exact connection instead of opening a new
 wrapper-owned one.
 
 Builds `libbouncer_ext.dylib` / `.so` for your platform and exposes the
@@ -137,12 +137,12 @@ SELECT bouncer_claim('scheduler', 'worker-a', 5000, 100);
 COMMIT;
 ```
 
-Inside an already-open transaction, Bouncer reuses the caller's current
+Inside an already-open transaction, Litelease reuses the caller's current
 transaction state instead of attempting a nested `BEGIN IMMEDIATE`.
 
 One important caveat: lock-upgrade timing in that path follows the
 caller’s outer transaction mode. `BEGIN IMMEDIATE` gives you the same
 up-front writer claim as the direct Rust path. Plain `BEGIN` can still
-surface SQLite lock/busy behavior before Bouncer gets to finish the
+surface SQLite lock/busy behavior before Litelease gets to finish the
 lease-level decision, and the user-visible behavior will also depend on
 the connection's `busy_timeout`.

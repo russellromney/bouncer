@@ -1,6 +1,6 @@
-//! Rust wrapper for Bouncer.
+//! Rust wrapper for Litelease.
 //!
-//! Bouncer is a SQLite lease primitive with expiry and fencing tokens.
+//! Litelease is a SQLite lease primitive with expiry and fencing tokens.
 //! This crate is the typed Rust layer on top of that shared lease state
 //! machine.
 //!
@@ -14,7 +14,7 @@
 //! ```rust
 //! use std::time::Duration;
 //!
-//! use bouncer::{Bouncer, ClaimResult};
+//! use litelease::{Bouncer, ClaimResult};
 //!
 //! let db = Bouncer::open("app.sqlite3")?;
 //! db.bootstrap()?;

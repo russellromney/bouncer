@@ -1,10 +1,10 @@
-# bouncer
+# litelease
 
 Leases, ownership, and fencing tokens for SQLite apps.
 
 ## What is this?
 
-Bouncer answers one small question: who owns this named resource right
+Litelease answers one small question: who owns this named resource right
 now?
 
 It gives a normal SQLite application a durable lease primitive in the
@@ -13,12 +13,12 @@ like one scheduler running at a time, one background worker owning a
 shard, one importer holding exclusive ownership while it works, or one
 process acting as leader for some local responsibility.
 
-Bouncer is not a queue, a workflow engine, or distributed consensus. It
+Litelease is not a queue, a workflow engine, or distributed consensus. It
 is a small SQLite state machine with expiry and fencing tokens.
 
 ## Status
 
-Bouncer is real and heavily tested, but still early. Today it has a
+Litelease is real and heavily tested, but still early. Today it has a
 Rust core, a SQLite loadable extension, a Rust wrapper, and direct proof
 for semantics, SQLite behavior, schema hardening, pragma-neutrality, and
 user-shaped acceptance.
@@ -27,7 +27,7 @@ What it does not have yet is a migration story, a package-manager-first
 install story across every surface, or any claim to distributed
 consensus or multi-machine coordination.
 
-The clearest way to think about it today is: the SQL extension is the
+The clearest way to think about Litelease today is: the SQL extension is the
 base interoperability surface, and the Rust wrapper is the main typed
 convenience layer.
 
@@ -49,12 +49,12 @@ If you want the quickest hands-on path, start with:
 
 ## How do I install it?
 
-Today the cleanest way to use Bouncer is still from source.
+Today the cleanest way to use Litelease is still from source.
 
 - **SQL extension**: build `bouncer-extension` and load the resulting
   `libbouncer_ext.{dylib,so,dll}` into the SQLite connection you already
   own
-- **Rust wrapper**: use the in-repo crate today
+- **Rust wrapper**: use the `litelease` crate from this repo today
 - **Python**: use stdlib `sqlite3` and load the extension on the
   connection you already manage
 
@@ -100,11 +100,11 @@ tables with fuzzy semantics, PID files and temp files, hand-rolled
 "heartbeat" rows, or dragging in Redis or a bigger coordination system
 for a local app.
 
-Bouncer exists to make that boring.
+Litelease exists to make that boring.
 
 ## Why not just a lock table?
 
-A lock table can be enough for a rough internal tool. Bouncer exists for
+A lock table can be enough for a rough internal tool. Litelease exists for
 the parts that usually stay under-specified: what reclaim means after
 expiry, how stale actors are fenced off, how lease conflict differs from
 SQLite `BUSY` / `LOCKED`, how the lease mutation should participate in
@@ -116,18 +116,18 @@ contract is the larger part of the problem.
 
 ## Why would I use it?
 
-Use Bouncer when you already use SQLite, want one durable owner of a
+Use Litelease when you already use SQLite, want one durable owner of a
 named resource, want expiry and takeover to be explicit, care about
 stale-actor protection, and want to keep coordination in the same file
 as the rest of the app.
 
-Do not use Bouncer when you need cross-machine consensus, fairness or
-waiting queues, a job system rather than a lease primitive, or Bouncer
+Do not use Litelease when you need cross-machine consensus, fairness or
+waiting queues, a job system rather than a lease primitive, or Litelease
 itself to enforce downstream stale-write rejection.
 
 ## Limitations
 
-Bouncer is intentionally narrow. It is for a single machine and one
+Litelease is intentionally narrow. It is for a single machine and one
 SQLite file. It does not have a migration story today, it does not try
 to provide fairness or waiting-queue semantics, and it is not
 distributed consensus. Downstream token enforcement is still the
@@ -135,7 +135,7 @@ caller’s job.
 
 ## Design at a glance
 
-Bouncer stores lease state in one table, `bouncer_resources`. Each
+Litelease stores lease state in one table, `bouncer_resources`. Each
 resource row tracks a `name`, an `owner`, a monotonic `token`, and
 `lease_expires_at_ms`.
 
@@ -157,7 +157,7 @@ All shipped surfaces share one schema and one lease state machine.
 | Surface | Who owns the SQLite connection? | Best for |
 |---|---|---|
 | SQL extension | caller | any app that already owns the SQLite connection |
-| Rust `Bouncer` | Bouncer | normal Rust apps that want typed results |
+| Rust `Bouncer` | wrapper-owned connection | normal Rust apps that want typed results |
 | Rust `BouncerRef` | caller | Rust code that already owns a `rusqlite::Connection` or transaction |
 
 The shortest rule is:
@@ -169,7 +169,7 @@ The shortest rule is:
 
 ### SQL extension
 
-Use this when you already own the SQLite connection and want Bouncer to
+Use this when you already own the SQLite connection and want Litelease to
 participate on that exact connection.
 
 ```sql
@@ -188,7 +188,8 @@ SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
 COMMIT;
 ```
 
-The SQL surface keeps time explicit. You pass `now_ms` yourself.
+The SQL surface keeps time explicit. You pass `now_ms` yourself. The SQL
+prefix is still `bouncer_*` today.
 
 See also:
 
@@ -205,7 +206,7 @@ sanctioned transaction/savepoint surface.
 ```rust
 use std::time::Duration;
 
-use bouncer::{Bouncer, ClaimResult};
+use litelease::{Bouncer, ClaimResult};
 
 let db = Bouncer::open("app.sqlite3")?;
 db.bootstrap()?;
@@ -226,7 +227,8 @@ See also:
 - [packages/bouncer/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/basic_claim.rs)
 - [packages/bouncer/examples/transactional_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/transactional_claim.rs)
 
-`Bouncer` is the default Rust surface. `BouncerRef` is the lower-level
+The published Rust crate is `litelease`. `Bouncer` is still the main
+wrapper type, and `BouncerRef` is the lower-level
 integration surface when your code already owns the `rusqlite::Connection`
 or the current transaction/savepoint boundary.
 
@@ -285,7 +287,7 @@ Rust wrapper example:
 ```rust
 use std::time::Duration;
 
-use bouncer::{Bouncer, ClaimResult};
+use litelease::{Bouncer, ClaimResult};
 use rusqlite::params;
 
 let mut db = Bouncer::open("app.sqlite3")?;
@@ -318,9 +320,9 @@ conn.commit()
 
 ## How does the transaction story work?
 
-There are two modes. In autocommit, Bouncer owns the transaction and
+There are two modes. In autocommit, Litelease owns the transaction and
 opens `BEGIN IMMEDIATE`. Inside a caller-owned transaction or savepoint,
-Bouncer reuses the boundary you already opened. That means it does not
+Litelease reuses the boundary you already opened. That means it does not
 invent a separate transaction model.
 
 The main practical implication is that deferred `BEGIN` and
@@ -338,15 +340,15 @@ These are the sharp edges worth remembering.
 
 ### Lease busy is not SQLite busy/locked
 
-If another owner already holds a live lease, Bouncer returns a lease
+If another owner already holds a live lease, Litelease returns a lease
 busy result: Rust gives `ClaimResult::Busy`, and SQL returns `NULL`
 from `bouncer_claim(...)`. That is different from SQLite `BUSY` /
 `LOCKED`, which means writer contention or deferred lock-upgrade
 failure.
 
-### Bouncer is pragma-neutral
+### Litelease is pragma-neutral
 
-Bouncer does not set or normalize your connection policy. The current
+Litelease does not set or normalize your connection policy. The current
 proved set is `journal_mode`, `synchronous`, `busy_timeout`,
 `locking_mode`, and `foreign_keys`. Set them yourself before calling
 `bootstrap()` or before handing a connection to `BouncerRef`.
@@ -354,12 +356,12 @@ proved set is `journal_mode`, `synchronous`, `busy_timeout`,
 ### Bootstrap is strict
 
 If `bouncer_resources` already exists with the wrong shape, bootstrap
-fails loudly with `SchemaMismatch`. Bouncer is not a migration engine
+fails loudly with `SchemaMismatch`. Litelease is not a migration engine
 and does not silently accept drifted schema.
 
 ### Fencing tokens matter only if you carry them
 
-Bouncer guarantees monotonic tokens. It cannot make your downstream
+Litelease guarantees monotonic tokens. It cannot make your downstream
 systems check them for you. If stale-actor protection matters beyond
 SQLite, carry the token to the place where side effects happen.
 
@@ -367,7 +369,7 @@ SQLite, carry the token to the place where side effects happen.
 
 ### Why not just use a lock table?
 
-You can, if the happy path is all you need. Bouncer exists for the
+You can, if the happy path is all you need. Litelease exists for the
 harder parts: expiry/reclaim semantics, monotonic fencing tokens, lease
 busy versus SQLite busy/locked, transaction/savepoint participation, and
 strict handling of drifted or invalid persisted state.
@@ -375,7 +377,7 @@ strict handling of drifted or invalid persisted state.
 ### Why not just use Redis or Postgres advisory locks?
 
 If your app already runs Redis or Postgres and that solves the right
-problem for you, that can be a fine choice. Bouncer is for the narrower
+problem for you, that can be a fine choice. Litelease is for the narrower
 case where SQLite is already the datastore and you want the lease state
 in the same file as the rest of the application.
 
@@ -391,7 +393,7 @@ through your side-effect boundary.
 Use the SQL extension when you already own the SQLite connection. Use
 the Rust wrapper when you want a friendlier typed Rust API on a
 wrapper-owned connection. Use `BouncerRef` when Rust already owns the
-connection and you want Bouncer to participate in that exact SQLite
+connection and you want Litelease to participate in that exact SQLite
 boundary.
 
 ### What should Python users do?
@@ -446,7 +448,7 @@ at your option.
 
 ## Origins
 
-Bouncer started alongside other SQLite infrastructure work, but the
+Litelease started alongside other SQLite infrastructure work, but the
 primitive stands on its own. If you have a single-machine SQLite app and
 need durable ownership with fencing, you do not need the rest of that
 larger context to use it.

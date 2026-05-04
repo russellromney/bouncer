@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use bouncer::{Bouncer, BouncerRef, ClaimResult};
+use litelease::{Bouncer, BouncerRef, ClaimResult};
 use bouncer_core as core;
 use rusqlite::{params, Connection, ErrorCode};
 use tempfile::TempDir;
@@ -60,7 +60,7 @@ fn open_conn(path: &Path, journal_mode: JournalMode, busy_timeout: Duration) -> 
     conn
 }
 
-fn assert_wrapper_claim(result: bouncer::Result<ClaimResult>, expect: Expect) {
+fn assert_wrapper_claim(result: litelease::Result<ClaimResult>, expect: Expect) {
     match (result, expect) {
         (Ok(ClaimResult::Acquired(_)), Expect::Acquired) => {}
         (Ok(ClaimResult::Busy(_)), Expect::LeaseBusy) => {}
@@ -69,10 +69,10 @@ fn assert_wrapper_claim(result: bouncer::Result<ClaimResult>, expect: Expect) {
     }
 }
 
-fn wrapper_error_is_busy_or_locked(err: &bouncer::Error) -> bool {
+fn wrapper_error_is_busy_or_locked(err: &litelease::Error) -> bool {
     match err {
-        bouncer::Error::Sqlite(err) => sqlite_error_is_busy_or_locked(err),
-        bouncer::Error::Core(core::Error::Sqlite(err)) => sqlite_error_is_busy_or_locked(err),
+        litelease::Error::Sqlite(err) => sqlite_error_is_busy_or_locked(err),
+        litelease::Error::Core(core::Error::Sqlite(err)) => sqlite_error_is_busy_or_locked(err),
         _ => false,
     }
 }

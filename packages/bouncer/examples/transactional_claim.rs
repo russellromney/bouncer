@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bouncer::{Bouncer, ClaimResult};
+use litelease::{Bouncer, ClaimResult};
 use rusqlite::params;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

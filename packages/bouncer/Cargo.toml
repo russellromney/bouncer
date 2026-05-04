@@ -1,13 +1,13 @@
 [package]
-name = "bouncer"
+name = "litelease"
 version = "0.1.0"
 edition = "2021"
-description = "Rust wrapper for Bouncer, a SQLite lease primitive with expiry and fencing tokens."
+description = "Rust wrapper for Litelease, a SQLite lease primitive with expiry and fencing tokens."
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/russellromney/bouncer"
-homepage = "https://github.com/russellromney/bouncer"
-documentation = "https://docs.rs/bouncer"
+repository = "https://github.com/russellromney/litelease"
+homepage = "https://github.com/russellromney/litelease"
+documentation = "https://docs.rs/litelease"
 keywords = ["sqlite", "lease", "fencing", "coordination", "lock"]
 categories = ["database", "concurrency"]
 

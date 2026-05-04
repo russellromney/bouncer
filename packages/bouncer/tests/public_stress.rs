@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use bouncer::{Bouncer, BouncerRef, ClaimResult, ReleaseResult, RenewResult};
+use litelease::{Bouncer, BouncerRef, ClaimResult, ReleaseResult, RenewResult};
 use bouncer_core::attach_bouncer_functions;
 use rusqlite::{params, Connection};
 use tempfile::TempDir;

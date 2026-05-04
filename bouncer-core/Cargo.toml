@@ -2,10 +2,10 @@
 name = "bouncer-core"
 version = "0.1.0"
 edition = "2021"
-description = "Rust core for Bouncer, a SQLite lease and coordination library."
+description = "Rust core for Litelease, a SQLite lease and coordination library."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/russellromney/bouncer"
-homepage = "https://github.com/russellromney/bouncer"
+repository = "https://github.com/russellromney/litelease"
+homepage = "https://github.com/russellromney/litelease"
 documentation = "https://docs.rs/bouncer-core"
 
 [dependencies]

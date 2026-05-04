@@ -1,8 +1,8 @@
-# bouncer crate
+# litelease crate
 
-Rust wrapper for Bouncer.
+Rust wrapper for Litelease.
 
-Bouncer is a SQLite lease primitive with expiry and fencing tokens. This
+Litelease is a SQLite lease primitive with expiry and fencing tokens. This
 crate is the Rust convenience layer on top of that shared lease state
 machine.
 
@@ -41,7 +41,7 @@ lease contract still comes from `bouncer-core`.
 ```rust
 use std::time::Duration;
 
-use bouncer::{Bouncer, ClaimResult};
+use litelease::{Bouncer, ClaimResult};
 
 let db = Bouncer::open("app.sqlite3")?;
 db.bootstrap()?;
@@ -62,7 +62,7 @@ match db.claim("scheduler", "worker-a", Duration::from_secs(30))? {
 ```rust
 use std::time::Duration;
 
-use bouncer::{Bouncer, ClaimResult};
+use litelease::{Bouncer, ClaimResult};
 use rusqlite::params;
 
 let mut db = Bouncer::open("app.sqlite3")?;

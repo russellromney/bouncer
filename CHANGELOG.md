@@ -4,6 +4,8 @@
 
 Changed:
 
+- the GitHub repo is now `russellromney/litelease`
+- the published Rust wrapper crate is now named `litelease`
 - the repo is now dual-licensed under MIT or Apache-2.0
 - `packages/bouncer-py` has been retired as a shipped surface
 - Python usage is now documented through stdlib `sqlite3` plus the

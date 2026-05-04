@@ -1,8 +1,8 @@
-# Bouncer Roadmap
+# Litelease Roadmap
 
 ## Summary
 
-Bouncer should be the sharpest "who owns this right now?" primitive for
+Litelease should be the sharpest "who owns this right now?" primitive for
 SQLite apps.
 
 Its job is not to become a scheduler or workflow system. Its job is to
@@ -11,14 +11,14 @@ the app already uses.
 
 ## Intent artifacts
 
-- `SYSTEM.md` is the current English model of Bouncer.
+- `SYSTEM.md` is the current English model of Litelease.
 - `CHANGELOG.md` records what has landed.
 - future meaningful changes should add phase records with spec diffs,
   plans, and `reviews_and_decisions.md`.
 
 ## Current status
 
-Bouncer now has a real shipped baseline: core lease semantics, a SQLite
+Litelease now has a real shipped baseline: core lease semantics, a SQLite
 extension surface, a Rust wrapper, and a layered proof
 stack that covers semantics, SQLite behavior, integrity hardening,
 pragma-neutrality, user-shaped acceptance, release-shaped extension
@@ -30,7 +30,7 @@ smoke proof, and repeated public-surface stress.
 The intended product model is:
 
 - `bouncer-core`
-  Bouncer-specific schema and SQLite contract
+  Litelease schema and SQLite contract
 - `bouncer-extension`
   shared SQLite-facing SQL boundary
 - `packages/bouncer`
@@ -38,7 +38,7 @@ The intended product model is:
 
 ## Next build steps
 
-The next Bouncer work should stay small and user-driven, not footprint
+The next Litelease work should stay small and user-driven, not footprint
 driven.
 
 1. **Consumer-driven polish.**
@@ -71,7 +71,7 @@ story needs it, and keep the same terminal handle shape:
 
 ### Surface posture
 
-Bouncer is not trying to grow a large binding matrix.
+Litelease is not trying to grow a large binding matrix.
 
 The intended surface story is:
 
@@ -93,7 +93,7 @@ usually enough.
 
 ### Stress and fault proof
 
-Bouncer already has good direct proof for semantics, SQLite behavior,
+Litelease already has good direct proof for semantics, SQLite behavior,
 pragma-neutrality, integrity hardening, and user-shaped journeys.
 
 Future proof work should stay proportional:

@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use bouncer::{Bouncer, BouncerRef, ClaimResult};
+use litelease::{Bouncer, BouncerRef, ClaimResult};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
