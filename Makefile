@@ -1,13 +1,11 @@
-.PHONY: help test-rust build-ext build-py test-python test
+.PHONY: help test-rust build-ext test
 
 help:
 	@echo "bouncer development targets"
 	@echo ""
 	@echo "  make test-rust   - cargo test for Rust core, wrapper, and extension artifact"
 	@echo "  make build-ext   - build the SQLite loadable extension"
-	@echo "  make build-py    - build/install the Python extension with maturin"
-	@echo "  make test-python - build extension + Python package and run pytest"
-	@echo "  make test        - rust + python"
+	@echo "  make test        - alias for test-rust"
 
 test-rust:
 	cargo test -p bouncer -p bouncer-core
@@ -15,10 +13,4 @@ test-rust:
 build-ext:
 	cargo build -p bouncer-extension
 
-build-py:
-	uv run --group dev maturin develop --manifest-path packages/bouncer-py/Cargo.toml
-
-test-python: build-ext build-py
-	uv run --group dev pytest packages/bouncer-py/tests
-
-test: test-rust test-python
+test: test-rust

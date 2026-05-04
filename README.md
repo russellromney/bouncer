@@ -9,12 +9,9 @@ now?
 
 It gives a normal SQLite application a durable lease primitive in the
 same database file it already uses. That makes it useful for things
-like:
-
-- one scheduler should run at a time
-- one background worker should own a shard
-- one importer should hold exclusive ownership while it works
-- one process should be leader for some local responsibility
+like one scheduler running at a time, one background worker owning a
+shard, one importer holding exclusive ownership while it works, or one
+process acting as leader for some local responsibility.
 
 Bouncer is not a queue, a workflow engine, or distributed consensus. It
 is a small SQLite state machine with expiry and fencing tokens.
@@ -22,17 +19,17 @@ is a small SQLite state machine with expiry and fencing tokens.
 ## Status
 
 Bouncer is real and heavily tested, but still early. Today it has a
-Rust core, a SQLite loadable extension, a Rust wrapper, a small Python
-convenience layer, and direct proof for semantics, SQLite behavior,
-schema hardening, pragma-neutrality, and user-shaped acceptance.
+Rust core, a SQLite loadable extension, a Rust wrapper, and direct proof
+for semantics, SQLite behavior, schema hardening, pragma-neutrality, and
+user-shaped acceptance.
 
-What it does not have yet is a migration story, a broad binding
-strategy, a package-manager-first install story across every surface, or
-any claim to distributed consensus or multi-machine coordination.
+What it does not have yet is a migration story, a package-manager-first
+install story across every surface, or any claim to distributed
+consensus or multi-machine coordination.
 
-The clearest way to think about it today is: SQL extension as the base
-interoperability surface, Rust wrapper as the main convenience layer,
-and Python as the easiest way to try it from Python.
+The clearest way to think about it today is: the SQL extension is the
+base interoperability surface, and the Rust wrapper is the main typed
+convenience layer.
 
 ## How do I try it?
 
@@ -41,14 +38,13 @@ From the repo root:
 ```bash
 make test-rust
 make build-ext
-make test-python
 ```
 
 If you want the quickest hands-on path, start with:
 
 - [bouncer-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.sql)
+- [bouncer-extension/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.py)
 - [packages/bouncer/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/basic_claim.rs)
-- [packages/bouncer-py/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/basic_claim.py)
 
 ## How do I install it?
 
@@ -58,8 +54,8 @@ Today the cleanest way to use Bouncer is still from source.
   `libbouncer_ext.{dylib,so,dll}` into the SQLite connection you already
   own
 - **Rust wrapper**: use the in-repo crate today
-- **Python**: use the local development package if you want the easiest
-  way to try it from Python
+- **Python**: use stdlib `sqlite3` and load the extension on the
+  connection you already manage
 
 From the repo root, the extension build is:
 
@@ -82,12 +78,10 @@ What they usually do not have is a clean answer to:
 - "how do I fail over if the owner dies?"
 - "how do I stop a stale actor from continuing work after takeover?"
 
-The usual alternatives are all annoying in different ways:
-
-- ad hoc lock tables with fuzzy semantics
-- PID files and temp files
-- hand-rolled "heartbeat" rows
-- dragging in Redis or a bigger coordination system for a local app
+The usual alternatives are all annoying in different ways: ad hoc lock
+tables with fuzzy semantics, PID files and temp files, hand-rolled
+"heartbeat" rows, or dragging in Redis or a bigger coordination system
+for a local app.
 
 Bouncer exists to make that boring.
 
@@ -105,20 +99,14 @@ contract is the larger part of the problem.
 
 ## Why would I use it?
 
-Use Bouncer when:
+Use Bouncer when you already use SQLite, want one durable owner of a
+named resource, want expiry and takeover to be explicit, care about
+stale-actor protection, and want to keep coordination in the same file
+as the rest of the app.
 
-- you already use SQLite
-- you want one durable owner of a named resource
-- expiry and takeover should be explicit
-- stale-actor protection matters
-- you want to keep coordination in the same file as the rest of the app
-
-Do not use Bouncer when:
-
-- you need cross-machine consensus
-- you need fairness or waiting queues
-- you need a job system rather than a lease primitive
-- you want Bouncer to enforce downstream stale-write rejection by itself
+Do not use Bouncer when you need cross-machine consensus, fairness or
+waiting queues, a job system rather than a lease primitive, or Bouncer
+itself to enforce downstream stale-write rejection.
 
 ## Limitations
 
@@ -154,15 +142,13 @@ All shipped surfaces share one schema and one lease state machine.
 | SQL extension | caller | any app that already owns the SQLite connection |
 | Rust `Bouncer` | Bouncer | normal Rust apps that want typed results |
 | Rust `BouncerRef` | caller | Rust code that already owns a `rusqlite::Connection` or transaction |
-| Python `bouncer` | Bouncer | trying Bouncer from Python without hand-loading the extension |
 
 The shortest rule is:
 
 - if **you** already own the SQLite connection, use the **SQL extension**
 - if you are in **Rust** and want a wrapper-owned path, use **`Bouncer`**
 - if you are in **Rust** and already own the connection, use **`BouncerRef`**
-- if you are in **Python** and just want an easy way to try Bouncer, use the
-  **Python binding**
+- if you are in **Python**, use stdlib `sqlite3` plus the **SQL extension**
 
 ### SQL extension
 
@@ -176,12 +162,23 @@ SELECT bouncer_owner('scheduler', 1700000000000);
 SELECT bouncer_token('scheduler');
 ```
 
+Tiny transaction example:
+
+```sql
+BEGIN IMMEDIATE;
+INSERT INTO jobs(payload) VALUES ('work');
+SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
+COMMIT;
+```
+
 The SQL surface keeps time explicit. You pass `now_ms` yourself.
 
 See also:
 
 - [bouncer-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.sql)
 - [bouncer-extension/examples/transactional_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/transactional_claim.sql)
+- [bouncer-extension/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.py)
+- [bouncer-extension/examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/transactional_claim.py)
 
 ### Rust wrapper
 
@@ -216,33 +213,30 @@ See also:
 integration surface when your code already owns the `rusqlite::Connection`
 or the current transaction/savepoint boundary.
 
-### Python binding
+### Python
 
-Use this when you want the easiest way to try Bouncer from Python and
-you are happy letting the binding own the SQLite connection.
+Python is not a separate package surface anymore. The intended Python
+story is stdlib `sqlite3` plus the SQL extension on the connection you
+already own.
 
 ```python
-import bouncer
+import sqlite3
 
-db = bouncer.open("app.sqlite3")
-db.bootstrap()
+conn = sqlite3.connect("app.sqlite3")
+conn.enable_load_extension(True)
+conn.load_extension("target/release/libbouncer_ext")
 
-result = db.claim("scheduler", "worker-a", ttl_ms=30_000)
-if result.acquired:
-    print(result.lease.token)
-else:
-    print(result.current.owner)
+conn.execute("SELECT bouncer_bootstrap()")
+token = conn.execute(
+    "SELECT bouncer_claim(?, ?, ?, ?)",
+    ("scheduler", "worker-a", 30_000, 1_700_000_000_000),
+).fetchone()[0]
+
+print(token)
 ```
 
-See also:
-
-- [packages/bouncer-py/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/basic_claim.py)
-- [packages/bouncer-py/examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/transactional_claim.py)
-
-This is intentionally not the main integration surface for Python. It is
-a thin convenience layer and an easy try-it-out path. If you already own
-a `sqlite3.Connection`, use the SQL extension on the connection you
-already manage.
+If you are already in Python, this keeps the boundary simple: one
+SQLite connection, one extension, one set of SQL functions.
 
 ## How do I use it?
 
@@ -257,6 +251,15 @@ The happy path is:
 
 If your app needs one business write plus one lease mutation to commit
 or roll back together, use a caller-owned transaction boundary.
+
+SQL transaction example:
+
+```sql
+BEGIN IMMEDIATE;
+INSERT INTO jobs(payload) VALUES ('work');
+SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
+COMMIT;
+```
 
 Rust wrapper example:
 
@@ -282,20 +285,17 @@ match tx.claim("scheduler", "worker-a", Duration::from_secs(30))? {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Python binding example:
+Python `sqlite3` example:
 
 ```python
-with db.transaction() as tx:
-    tx.execute("INSERT INTO jobs(payload) VALUES (?)", ["work"])
-    claim = tx.claim("scheduler", "worker-a", ttl_ms=30_000)
-    if not claim.acquired:
-        tx.rollback()
+conn.execute("BEGIN IMMEDIATE")
+conn.execute("INSERT INTO jobs(payload) VALUES (?)", ("work",))
+token = conn.execute(
+    "SELECT bouncer_claim(?, ?, ?, ?)",
+    ("scheduler", "worker-a", 30_000, 1_700_000_000_000),
+).fetchone()[0]
+conn.commit()
 ```
-
-If you already own a `sqlite3.Connection` in Python, use the SQL
-extension instead of the Python binding. The Python binding is meant to
-be the easy try-it-out path, not a second way to drive an already-open
-SQLite handle.
 
 ## How does the transaction story work?
 
@@ -320,10 +320,10 @@ These are the sharp edges worth remembering.
 ### Lease busy is not SQLite busy/locked
 
 If another owner already holds a live lease, Bouncer returns a lease
-busy result: Rust gives `ClaimResult::Busy`, Python gives
-`acquired=False`, and SQL returns `NULL` from `bouncer_claim(...)`.
-That is different from SQLite `BUSY` / `LOCKED`, which means writer
-contention or deferred lock-upgrade failure.
+busy result: Rust gives `ClaimResult::Busy`, and SQL returns `NULL`
+from `bouncer_claim(...)`. That is different from SQLite `BUSY` /
+`LOCKED`, which means writer contention or deferred lock-upgrade
+failure.
 
 ### Bouncer is pragma-neutral
 
@@ -375,11 +375,12 @@ wrapper-owned connection. Use `BouncerRef` when Rust already owns the
 connection and you want Bouncer to participate in that exact SQLite
 boundary.
 
-### Is Python a primary surface?
+### What should Python users do?
 
-Not really. The Python package is a thin convenience layer and an easy
-way to try Bouncer from Python. The main product surfaces are the SQL
-extension and the Rust wrapper.
+Use stdlib `sqlite3`, enable extension loading, and load
+`libbouncer_ext`. That keeps Python on the same base surface as every
+other caller-owned SQLite integration instead of adding a second Python
+API.
 
 ## Current proof
 
@@ -393,11 +394,7 @@ That acceptance layer includes fresh bootstrap plus first claim,
 independent second-caller busy, release/reclaim token increase,
 deterministic expiry/reclaim token increase, transaction atomic
 visibility, loud drifted-schema bootstrap failure, and direct Rust
-wrapper / SQL extension / Python binding interop.
-
-Python is useful here mostly as a convenience/demo layer and as a
-cross-surface proof surface. The core product story is still the SQL
-extension plus the Rust wrapper.
+wrapper / SQL extension cross-surface visibility.
 
 ## Repository map
 
@@ -407,16 +404,22 @@ extension plus the Rust wrapper.
   SQLite loadable extension
 - [packages/bouncer](/Users/russellromney/Documents/Github/bouncer/packages/bouncer)
   Rust wrapper
-- [packages/bouncer-py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py)
-  Python binding
 
 ## Development
 
 ```bash
 make test-rust
-make test-python
 make test
 ```
+
+## License
+
+Dual-licensed under either:
+
+- [MIT](/Users/russellromney/Documents/Github/bouncer/LICENSE-MIT)
+- [Apache-2.0](/Users/russellromney/Documents/Github/bouncer/LICENSE-APACHE)
+
+at your option.
 
 ## Origins
 

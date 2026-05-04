@@ -71,6 +71,22 @@ Raw SQLite C API / SQL:
 - load `libbouncer_ext.{dylib,so,dll}`
 - call `SELECT bouncer_bootstrap()`
 
+Python `sqlite3`:
+
+```python
+import sqlite3
+
+conn = sqlite3.connect("app.sqlite3")
+conn.enable_load_extension(True)
+conn.load_extension("target/release/libbouncer_ext")
+conn.execute("SELECT bouncer_bootstrap()")
+```
+
+See also:
+
+- [examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.py)
+- [examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/transactional_claim.py)
+
 ## Transaction model
 
 `bouncer_claim`, `bouncer_renew`, and `bouncer_release` work in both:

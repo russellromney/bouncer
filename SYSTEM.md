@@ -115,40 +115,15 @@ The wrapper requires explicit `bootstrap()` and does not create schema state in
 `journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`, and
 `foreign_keys`.
 
-## Python Binding
+## Python Story
 
-`packages/bouncer-py` imports as `bouncer` and uses a PyO3 native module at
-`bouncer._bouncer_native`. The binding calls `bouncer-core` directly for lease
-semantics and returns pure-Python dataclasses for result objects. It is a thin
-owned-connection convenience layer, not the base interoperability surface for
-Python. The SQLite extension remains the caller-owned connection path.
+There is no separate shipped Python package in the current baseline.
+Python callers are expected to use stdlib `sqlite3` with the SQLite
+loadable extension on the connection they already own.
 
-The public Python package exposes `Bouncer`, `BouncerError`, result dataclasses,
-and `open`. It exposes `bootstrap`, `inspect`, `claim`, `renew`, and `release`
-on `Bouncer`. `Transaction` is reached through `db.transaction()` and is not
-exported from `bouncer.__all__`.
-
-The Python binding owns its SQLite connection. Python callers who already own a
-`sqlite3.Connection` should use the SQL extension surface instead.
-
-The supported Python V1 transaction shape is `with db.transaction() as tx:`.
-`Bouncer.transaction()` is side-effect-free and returns an unentered
-transaction handle. `BEGIN IMMEDIATE` opens inside `Transaction.__enter__`.
-`Transaction` is single-use: entering twice or entering after explicit
-`commit`/`rollback` raises `BouncerError`. Calling transaction verbs before
-`__enter__` raises `BouncerError` with a message pointing at
-`with db.transaction() as tx:`.
-
-If `__enter__` fails while beginning the transaction, the transaction remains
-unentered and can be entered again after the contention clears. While a Python
-transaction is active, top-level lease operations on the same `Bouncer` handle
-fail loudly; callers must use the transaction handle until it commits or rolls
-back. The Python `Transaction` has no `__del__` safety net; native handle
-teardown is the only orphan safety path for `transaction_active = True`.
-
-`tx.execute(sql, params=None)` binds positional parameters and returns the
-affected-row count. It is a single-statement helper. SQL syntax errors and
-multi-statement strings raise `BouncerError`.
+That keeps Python on the same base surface as other caller-owned
+connection integrations: explicit extension loading, explicit SQL
+functions, and no extra binding-specific lease semantics.
 
 ## Proof Baseline
 
@@ -203,20 +178,14 @@ mutators, and typed savepoints.
 Rust tests also build and load the `bouncer-extension` cdylib through rusqlite
 and exercise every `bouncer_*` function.
 
-Python tests prove explicit bootstrap, full lifecycle behavior, transaction
-commit/rollback coupling, terminal context-manager behavior, parameter binding,
-`BouncerError` coverage for core and SQL errors, multi-statement rejection,
-begin-failure re-entry, and SQLite-extension interop on one database file.
-
-There is also now a small public-surface acceptance layer. The Rust and Python
-acceptance tests prove fresh bootstrap plus first claim, independent second
-caller busy, release/reclaim token increase, deterministic expiry/reclaim token
-increase through explicit-time SQL, atomic commit visibility for business write
-plus lease mutation, loud drifted-schema bootstrap failure through wrapper /
-Python / SQL bootstrap, and one direct three-surface journey where Python, SQL,
-and the Rust wrapper observe the same lease state transitions on one database
-file. Python's role in that proof is mainly convenience and cross-surface
-verification rather than defining the main product boundary.
+There is also now a small public-surface acceptance layer. The Rust
+acceptance tests prove fresh bootstrap plus first claim, independent
+second-caller busy, release/reclaim token increase, deterministic
+expiry/reclaim token increase through explicit-time SQL, atomic commit
+visibility for business write plus lease mutation, loud drifted-schema
+bootstrap failure through wrapper and SQL bootstrap, and direct Rust
+wrapper / SQL extension cross-surface state visibility on one database
+file.
 
 Contention semantics are primarily proven at the core and extension boundaries.
 The wrappers prove thin delegation, interop, and transaction participation
@@ -227,6 +196,8 @@ rather than a separate concurrency model.
 Bouncer is the lease/coordination primitive. It is intentionally much
 smaller than a queue, scheduler, or workflow system.
 
-Language bindings are typed wrappers over `bouncer-core` where rich typed
-results matter. The SQLite extension remains the caller-owned connection
-surface. Package registry publishing is not part of the current baseline.
+The SQLite extension is the main caller-owned connection surface.
+Language-specific wrappers should only exist when they provide a
+meaningfully better local experience than driving the extension
+directly. Package registry publishing is not part of the current
+baseline.

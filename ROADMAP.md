@@ -19,7 +19,7 @@ the app already uses.
 ## Current status
 
 Bouncer now has a real shipped baseline: core lease semantics, a SQLite
-extension surface, a Rust wrapper, a Python binding, and a layered proof
+extension surface, a Rust wrapper, and a layered proof
 stack that covers semantics, SQLite behavior, integrity hardening,
 pragma-neutrality, and user-shaped acceptance.
 
@@ -34,30 +34,24 @@ The intended product model is:
   shared SQLite-facing SQL boundary
 - `packages/bouncer`
   Rust convenience wrapper
-- `packages/bouncer-py`
-  Python convenience/demo wrapper
 
 ## Next build steps
 
 The next Bouncer work should focus on surface clarity and correctness,
 not on expanding footprint.
 
-1. **Python surface and boundary pass.**
-   Re-check whether the Python binding is exposing exactly the right
-   surface:
-   - owned-connection convenience/demo only
-   - no shadow caller-owned-connection API
-   - docs and examples that point caller-owned Python SQLite users at
-     the SQL extension
-   - clear parity and non-parity with the Rust wrapper
-2. **Cross-surface boundary polish.**
+1. **Cross-surface boundary polish.**
    Keep making the SQL extension feel like the base interoperability
-   surface and the Rust/Python wrappers feel like convenience layers
-   rather than competing products.
-3. **Targeted stress hardening.**
+   surface and the Rust wrapper feel like a convenience layer rather
+   than a competing product. Python should stay on the SQL extension
+   path through examples and docs, not a second package surface.
+2. **Targeted stress hardening.**
    Add more narrow proof where it buys confidence, especially around
    multi-connection behavior, without committing to a full deterministic
    simulator program unless real bugs justify that investment.
+3. **Distribution and release polish.**
+   Make the extension easier to build, ship, and consume from normal
+   SQLite clients without widening the product surface.
 
 ## Future proposals
 
@@ -85,8 +79,8 @@ The intended surface story is:
 
 - the SQL extension is the base interoperability surface
 - the Rust wrapper is the primary convenience layer for Rust
-- the Python binding is a convenience/demo layer, not the center of the
-  product story
+- Python should use `sqlite3` plus the SQL extension examples rather
+  than a separate package surface
 - new bindings should only exist when a real consumer needs one and the
   SQL extension alone is meaningfully awkward
 

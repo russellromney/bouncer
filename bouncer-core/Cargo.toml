@@ -3,7 +3,7 @@ name = "bouncer-core"
 version = "0.1.0"
 edition = "2021"
 description = "Rust core for Bouncer, a SQLite lease and coordination library."
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 rusqlite = { version = "0.39.0", features = ["functions"] }

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Changed:
+
+- the repo is now dual-licensed under MIT or Apache-2.0
+- `packages/bouncer-py` has been retired as a shipped surface
+- Python usage is now documented through stdlib `sqlite3` plus the
+  SQLite extension examples instead of a separate package API
+
 ### Phase 001 — core lease contract
 
 Added:
