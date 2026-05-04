@@ -1,12 +1,11 @@
 # bouncer
 
-SQLite leases, ownership, and fencing tokens for single-machine apps.
+Leases, ownership, and fencing tokens for SQLite apps.
 
 ## What is this?
 
-Bouncer answers one small question:
-
-Who owns this named resource right now?
+Bouncer answers one small question: who owns this named resource right
+now?
 
 It gives a normal SQLite application a durable lease primitive in the
 same database file it already uses. That makes it useful for things
@@ -17,9 +16,60 @@ like:
 - one importer should hold exclusive ownership while it works
 - one process should be leader for some local responsibility
 
-Bouncer is not a queue, not a workflow engine, and not distributed
-consensus. It is a small SQLite state machine with expiry and fencing
-tokens.
+Bouncer is not a queue, a workflow engine, or distributed consensus. It
+is a small SQLite state machine with expiry and fencing tokens.
+
+## Status
+
+Bouncer is real and heavily tested, but still early. Today it has a
+Rust core, a SQLite loadable extension, a Rust wrapper, a small Python
+convenience layer, and direct proof for semantics, SQLite behavior,
+schema hardening, pragma-neutrality, and user-shaped acceptance.
+
+What it does not have yet is a migration story, a broad binding
+strategy, a package-manager-first install story across every surface, or
+any claim to distributed consensus or multi-machine coordination.
+
+The clearest way to think about it today is: SQL extension as the base
+interoperability surface, Rust wrapper as the main convenience layer,
+and Python as the easiest way to try it from Python.
+
+## How do I try it?
+
+From the repo root:
+
+```bash
+make test-rust
+make build-ext
+make test-python
+```
+
+If you want the quickest hands-on path, start with:
+
+- [bouncer-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.sql)
+- [packages/bouncer/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/basic_claim.rs)
+- [packages/bouncer-py/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/basic_claim.py)
+
+## How do I install it?
+
+Today the cleanest way to use Bouncer is still from source.
+
+- **SQL extension**: build `bouncer-extension` and load the resulting
+  `libbouncer_ext.{dylib,so,dll}` into the SQLite connection you already
+  own
+- **Rust wrapper**: use the in-repo crate today
+- **Python**: use the local development package if you want the easiest
+  way to try it from Python
+
+From the repo root, the extension build is:
+
+```bash
+cargo build -p bouncer-extension --release
+```
+
+The output artifact will be under `target/release/`. Tagged GitHub
+releases also build and attach prebuilt extension binaries for the main
+platforms.
 
 ## Why does it exist?
 
@@ -41,6 +91,18 @@ The usual alternatives are all annoying in different ways:
 
 Bouncer exists to make that boring.
 
+## Why not just a lock table?
+
+A lock table can be enough for a rough internal tool. Bouncer exists for
+the parts that usually stay under-specified: what reclaim means after
+expiry, how stale actors are fenced off, how lease conflict differs from
+SQLite `BUSY` / `LOCKED`, how the lease mutation should participate in
+caller-owned transactions and savepoints, and what happens when the
+persisted state is invalid or has drifted from the expected schema.
+
+The happy path can be a handful of SQL statements. The edge-case
+contract is the larger part of the problem.
+
 ## Why would I use it?
 
 Use Bouncer when:
@@ -58,24 +120,24 @@ Do not use Bouncer when:
 - you need a job system rather than a lease primitive
 - you want Bouncer to enforce downstream stale-write rejection by itself
 
+## Limitations
+
+Bouncer is intentionally narrow. It is for a single machine and one
+SQLite file. It does not have a migration story today, it does not try
+to provide fairness or waiting-queue semantics, and it is not
+distributed consensus. Downstream token enforcement is still the
+caller’s job.
+
 ## Design at a glance
 
-Bouncer stores lease state in one table: `bouncer_resources`.
+Bouncer stores lease state in one table, `bouncer_resources`. Each
+resource row tracks a `name`, an `owner`, a monotonic `token`, and
+`lease_expires_at_ms`.
 
-Each resource has:
-
-- `name`
-- `owner`
-- `token`
-- `lease_expires_at_ms`
-
-The important rules are:
-
-- the first successful claim creates the row
-- a live lease blocks a second claim
-- release and expiry clear live ownership
-- reclaim after release or expiry increments the fencing token
-- tokens never go backwards
+The contract is simple but specific: the first successful claim creates
+the row, a live lease blocks a second claim, release and expiry clear
+live ownership, reclaim after release or expiry increments the fencing
+token, and tokens never go backwards.
 
 That last part matters. The token is how you protect downstream systems
 from stale actors. If worker A loses the lease and worker B takes over,
@@ -177,11 +239,10 @@ See also:
 - [packages/bouncer-py/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/basic_claim.py)
 - [packages/bouncer-py/examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/packages/bouncer-py/examples/transactional_claim.py)
 
-This is intentionally **not** the main integration surface for Python.
-It exists as a thin convenience layer and an easy try-it-out path.
-
-If you already own a `sqlite3.Connection`, use the SQL extension on the
-connection you already manage.
+This is intentionally not the main integration surface for Python. It is
+a thin convenience layer and an easy try-it-out path. If you already own
+a `sqlite3.Connection`, use the SQL extension on the connection you
+already manage.
 
 ## How do I use it?
 
@@ -238,14 +299,10 @@ SQLite handle.
 
 ## How does the transaction story work?
 
-There are two modes:
-
-- **autocommit mutators**
-  Bouncer owns the transaction and opens `BEGIN IMMEDIATE`
-- **caller-owned transaction or savepoint**
-  Bouncer reuses the boundary you already opened
-
-That means Bouncer does not invent a separate transaction model.
+There are two modes. In autocommit, Bouncer owns the transaction and
+opens `BEGIN IMMEDIATE`. Inside a caller-owned transaction or savepoint,
+Bouncer reuses the boundary you already opened. That means it does not
+invent a separate transaction model.
 
 The main practical implication is that deferred `BEGIN` and
 `BEGIN IMMEDIATE` are different:
@@ -263,28 +320,17 @@ These are the sharp edges worth remembering.
 ### Lease busy is not SQLite busy/locked
 
 If another owner already holds a live lease, Bouncer returns a lease
-busy result:
-
-- Rust: `ClaimResult::Busy`
-- Python: `acquired=False`
-- SQL: `NULL` from `bouncer_claim(...)`
-
+busy result: Rust gives `ClaimResult::Busy`, Python gives
+`acquired=False`, and SQL returns `NULL` from `bouncer_claim(...)`.
 That is different from SQLite `BUSY` / `LOCKED`, which means writer
 contention or deferred lock-upgrade failure.
 
 ### Bouncer is pragma-neutral
 
 Bouncer does not set or normalize your connection policy. The current
-proved set is:
-
-- `journal_mode`
-- `synchronous`
-- `busy_timeout`
-- `locking_mode`
-- `foreign_keys`
-
-Set them yourself before calling `bootstrap()` or before handing a
-connection to `BouncerRef`.
+proved set is `journal_mode`, `synchronous`, `busy_timeout`,
+`locking_mode`, and `foreign_keys`. Set them yourself before calling
+`bootstrap()` or before handing a connection to `BouncerRef`.
 
 ### Bootstrap is strict
 
@@ -298,26 +344,56 @@ Bouncer guarantees monotonic tokens. It cannot make your downstream
 systems check them for you. If stale-actor protection matters beyond
 SQLite, carry the token to the place where side effects happen.
 
+## FAQ
+
+### Why not just use a lock table?
+
+You can, if the happy path is all you need. Bouncer exists for the
+harder parts: expiry/reclaim semantics, monotonic fencing tokens, lease
+busy versus SQLite busy/locked, transaction/savepoint participation, and
+strict handling of drifted or invalid persisted state.
+
+### Why not just use Redis or Postgres advisory locks?
+
+If your app already runs Redis or Postgres and that solves the right
+problem for you, that can be a fine choice. Bouncer is for the narrower
+case where SQLite is already the datastore and you want the lease state
+in the same file as the rest of the application.
+
+### What happens if the owner dies?
+
+The lease expires, another caller can reclaim it, and the next
+successful owner gets a larger fencing token. That token is what lets
+downstream systems reject stale work from the old owner if you carry it
+through your side-effect boundary.
+
+### When should I use SQL versus the Rust wrapper?
+
+Use the SQL extension when you already own the SQLite connection. Use
+the Rust wrapper when you want a friendlier typed Rust API on a
+wrapper-owned connection. Use `BouncerRef` when Rust already owns the
+connection and you want Bouncer to participate in that exact SQLite
+boundary.
+
+### Is Python a primary surface?
+
+Not really. The Python package is a thin convenience layer and an easy
+way to try Bouncer from Python. The main product surfaces are the SQL
+extension and the Rust wrapper.
+
 ## Current proof
 
-The repo now has direct proof for:
+The repo now has direct proof for core lease semantics, deterministic
+invariant coverage, SQLite busy/locked versus lease-busy behavior,
+strict schema-drift rejection and invalid-row hardening,
+pragma-neutrality across the main public surfaces, and user-shaped
+acceptance journeys on one real database file.
 
-- core lease semantics
-- deterministic invariant coverage
-- SQLite busy/locked versus lease-busy behavior
-- strict schema-drift rejection and invalid-row hardening
-- pragma-neutrality across the main public surfaces
-- user-shaped acceptance journeys on one real database file
-
-That acceptance layer includes:
-
-- fresh bootstrap + first claim
-- independent second caller busy
-- release/reclaim token increase
-- deterministic expiry/reclaim token increase
-- transaction atomic visibility
-- loud drifted-schema bootstrap failure
-- direct Rust wrapper / SQL extension / Python binding interop
+That acceptance layer includes fresh bootstrap plus first claim,
+independent second-caller busy, release/reclaim token increase,
+deterministic expiry/reclaim token increase, transaction atomic
+visibility, loud drifted-schema bootstrap failure, and direct Rust
+wrapper / SQL extension / Python binding interop.
 
 Python is useful here mostly as a convenience/demo layer and as a
 cross-surface proof surface. The core product story is still the SQL
@@ -342,8 +418,9 @@ make test-python
 make test
 ```
 
-## Honker
+## Origins
 
-Bouncer started in the Honker family, but the primitive itself is more
-general than that origin story. If you have a single-machine SQLite app
-and need durable ownership with fencing, it stands on its own.
+Bouncer started alongside other SQLite infrastructure work, but the
+primitive stands on its own. If you have a single-machine SQLite app and
+need durable ownership with fencing, you do not need the rest of that
+larger context to use it.

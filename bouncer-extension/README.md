@@ -28,6 +28,23 @@ This makes the extension the right boundary for:
 - cross-language interop on one database file
 - business writes plus lease mutations in one caller-owned transaction
 
+## Build and release
+
+From the repo root:
+
+```bash
+cargo build -p bouncer-extension --release
+```
+
+That produces:
+
+- macOS: `target/release/libbouncer_ext.dylib`
+- Linux: `target/release/libbouncer_ext.so`
+- Windows: `target/release/bouncer_ext.dll`
+
+The repo also includes a GitHub Actions workflow that builds these
+artifacts for tagged releases and uploads them as release assets.
+
 ## Loading the extension
 
 SQLite CLI:

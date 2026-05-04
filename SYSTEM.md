@@ -1,7 +1,7 @@
 # Bouncer System
 
-Bouncer is a single-machine SQLite lease and ownership primitive for the
-Honker family. It answers one question: who owns this named resource right
+Bouncer is a single-machine SQLite lease and ownership primitive for
+SQLite apps. It answers one question: who owns this named resource right
 now? It is not consensus, not a workflow engine, and not a distributed
 coordinator. It is a small SQLite state machine with fencing tokens.
 
@@ -224,9 +224,9 @@ rather than a separate concurrency model.
 
 ## Boundaries
 
-Honker remains the generic async substrate for the family. Bouncer is the
-lease/coordination primitive that Honker may depend on later.
+Bouncer is the lease/coordination primitive. It is intentionally much
+smaller than a queue, scheduler, or workflow system.
 
 Language bindings are typed wrappers over `bouncer-core` where rich typed
-results matter. The SQLite extension remains the SQL-only surface. Package
-registry publishing is not part of the current baseline.
+results matter. The SQLite extension remains the caller-owned connection
+surface. Package registry publishing is not part of the current baseline.
