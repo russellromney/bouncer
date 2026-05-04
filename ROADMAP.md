@@ -29,11 +29,11 @@ smoke proof, and repeated public-surface stress.
 
 The intended product model is:
 
-- `bouncer-core`
+- `litelease-core`
   Litelease schema and SQLite contract
-- `bouncer-extension`
+- `litelease-extension`
   shared SQLite-facing SQL boundary
-- `packages/bouncer`
+- `packages/litelease`
   Rust convenience wrapper
 
 ## Next build steps

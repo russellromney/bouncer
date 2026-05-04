@@ -1,0 +1,21 @@
+[package]
+name = "litelease"
+version = "0.1.0"
+edition = "2021"
+description = "Rust wrapper for Litelease, a SQLite lease primitive with expiry and fencing tokens."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/russellromney/litelease"
+homepage = "https://github.com/russellromney/litelease"
+documentation = "https://docs.rs/litelease"
+keywords = ["sqlite", "lease", "fencing", "coordination", "lock"]
+categories = ["database", "concurrency"]
+
+[dependencies]
+litelease-core = { path = "../../litelease-core", version = "0.1.0" }
+rusqlite = "0.39.0"
+thiserror = "2.0.17"
+
+[dev-dependencies]
+rusqlite = { version = "0.39.0", features = ["bundled", "load_extension"] }
+tempfile = "3"

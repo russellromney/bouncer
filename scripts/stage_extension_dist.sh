@@ -10,17 +10,17 @@ arch=$(uname -m)
 
 case "$os" in
   Darwin)
-    src="$target_dir/release/libbouncer_ext.dylib"
+    src="$target_dir/release/liblitelease_ext.dylib"
     ext="dylib"
     platform="macos"
     ;;
   Linux)
-    src="$target_dir/release/libbouncer_ext.so"
+    src="$target_dir/release/liblitelease_ext.so"
     ext="so"
     platform="linux"
     ;;
   MINGW*|MSYS*|CYGWIN*|Windows_NT)
-    src="$target_dir/release/bouncer_ext.dll"
+    src="$target_dir/release/litelease_ext.dll"
     ext="dll"
     platform="windows"
     ;;
@@ -39,11 +39,11 @@ case "$arch" in
     ;;
 esac
 
-asset_name="bouncer-extension-${platform}-${arch_tag}.${ext}"
+asset_name="litelease-extension-${platform}-${arch_tag}.${ext}"
 
 if [ ! -f "$src" ]; then
   echo "missing built extension artifact at $src" >&2
-  echo "run: cargo build -p bouncer-extension --release" >&2
+  echo "run: cargo build -p litelease-extension --release" >&2
   exit 1
 fi
 

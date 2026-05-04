@@ -7,7 +7,7 @@ Changed:
 - the GitHub repo is now `russellromney/litelease`
 - the published Rust wrapper crate is now named `litelease`
 - the repo is now dual-licensed under MIT or Apache-2.0
-- `packages/bouncer-py` has been retired as a shipped surface
+- `packages/litelease-py` has been retired as a shipped surface
 - Python usage is now documented through stdlib `sqlite3` plus the
   SQLite extension examples instead of a separate package API
 
@@ -23,14 +23,14 @@ Added:
   and `.sha256` files
 - release workflow checksum generation and upload for extension assets
 - a release-built shared-library smoke test in
-  `packages/bouncer/tests/extension_load.rs`
-- `packages/bouncer/tests/public_stress.rs`, a repeated public-surface
+  `packages/litelease/tests/extension_load.rs`
+- `packages/litelease/tests/public_stress.rs`, a repeated public-surface
   stress suite over wrapper and SQL boundaries
 
 Changed:
 
 - extension release assets now use stable platform-specific names like
-  `bouncer-extension-linux-x86_64.so` and ship matching `.sha256` files
+  `litelease-extension-linux-x86_64.so` and ship matching `.sha256` files
 - release/install docs now show the real build, stage, and smoke path
   rather than only crate-local build steps
 
@@ -43,9 +43,9 @@ Clarified:
 
 Added:
 
-- initial repo scaffold for `bouncer`
-- first real `bouncer-honker` Rust core crate
-- SQLite bootstrap for `bouncer_resources`
+- initial repo scaffold for `litelease`
+- first real `litelease-core` Rust core crate
+- SQLite bootstrap for `litelease_resources`
 - Rust `claim`, `renew`, `release`, and time-aware `inspect` helpers
 - Phase 001 tests for claim, expiry, renew, release, and monotonic fencing behavior
 - first pass of `README.md`, `ROADMAP.md`, and `SYSTEM.md`
@@ -54,7 +54,7 @@ Added:
 
 Clarified:
 
-- Bouncer is a single-machine lease / fencing primitive for SQLite apps, not a distributed coordination system
+- Litelease is a single-machine lease / fencing primitive for SQLite apps, not a distributed coordination system
 - Phase 001 stops at the Rust core contract and tests
 - the repo phase workflow centers on `spec-diff.md`, `plan.md`, and `reviews_and_decisions.md`
 
@@ -62,7 +62,7 @@ Clarified:
 
 Added:
 
-- first Rust wrapper crate in `packages/bouncer`
+- first Rust wrapper crate in `packages/litelease`
 - explicit wrapper bootstrap plus owned/borrowed wrapper types
 - wrapper tests for negative bootstrap behavior, wrapper/core interop, TTL parity, and fencing-token monotonicity across wrapper/core calls
 
@@ -76,16 +76,16 @@ Clarified:
 
 Added:
 
-- first SQLite loadable-extension crate in `bouncer-extension`
-- first `bouncer_*` SQL surface:
-  - `bouncer_bootstrap()`
-  - `bouncer_claim(name, owner, ttl_ms, now_ms)`
-  - `bouncer_renew(name, owner, ttl_ms, now_ms)`
-  - `bouncer_release(name, owner, now_ms)`
-  - `bouncer_owner(name, now_ms)`
-  - `bouncer_token(name)`
-- direct SQL-function tests in `bouncer-honker`
-- SQL/Rust interop tests in `packages/bouncer`
+- first SQLite loadable-extension crate in `litelease-extension`
+- first `litelease_*` SQL surface:
+  - `litelease_bootstrap()`
+  - `litelease_claim(name, owner, ttl_ms, now_ms)`
+  - `litelease_renew(name, owner, ttl_ms, now_ms)`
+  - `litelease_release(name, owner, now_ms)`
+  - `litelease_owner(name, now_ms)`
+  - `litelease_token(name)`
+- direct SQL-function tests in `litelease-core`
+- SQL/Rust interop tests in `packages/litelease`
 
 Clarified:
 
@@ -95,7 +95,7 @@ Clarified:
 
 Added:
 
-- transaction-aware internal `claim_in_tx`, `renew_in_tx`, and `release_in_tx` helpers in `bouncer-honker`
+- transaction-aware internal `claim_in_tx`, `renew_in_tx`, and `release_in_tx` helpers in `litelease-core`
 - explicit-transaction SQL tests for commit and rollback behavior
 - multi-mutator transaction tests for commit and rollback behavior
 - read-helper-in-transaction proof
@@ -105,40 +105,40 @@ Added:
 
 Changed:
 
-- `bouncer_claim`, `bouncer_renew`, and `bouncer_release` now participate in caller-owned explicit transactions and savepoints instead of failing with SQLite's nested-transaction error
+- `litelease_claim`, `litelease_renew`, and `litelease_release` now participate in caller-owned explicit transactions and savepoints instead of failing with SQLite's nested-transaction error
 - the autocommit SQL path still preserves the direct Rust path's `BEGIN IMMEDIATE` behavior
 - the baseline docs now reflect the transactional SQL contract
-- the baseline docs now state plainly that fencing safety beyond SQLite requires downstream consumers to carry and compare Bouncer's token
+- the baseline docs now state plainly that fencing safety beyond SQLite requires downstream consumers to carry and compare Litelease's token
 
 ### Phase 005 — borrowed Rust transaction contract
 
 Added:
 
 - public `claim_in_tx`, `renew_in_tx`, and `release_in_tx` helpers in
-  `bouncer-honker`
+  `litelease-core`
 - `Error::NotInTransaction` fail-fast guard for public in-transaction
   Rust helpers
 - borrowed-wrapper tests for explicit transaction commit/rollback,
   multi-mutator commit/rollback, savepoint participation, and borrowed
   semantic-stress behavior
-- crate-level docs in `bouncer-honker` that explain when to use the
+- crate-level docs in `litelease-core` that explain when to use the
   transaction-owning helpers versus the caller-owned `*_in_tx` helpers
 
 Changed:
 
-- `BouncerRef::claim`, `renew`, and `release` now mirror the SQL
+- `LiteleaseRef::claim`, `renew`, and `release` now mirror the SQL
   extension's transaction behavior: autocommit opens its own
   `BEGIN IMMEDIATE`, while an already-open transaction or savepoint is
   reused instead of triggering a nested-transaction failure
-- `BouncerRef` now uses `borrowed()` instead of the old `as_ref()`
+- `LiteleaseRef` now uses `borrowed()` instead of the old `as_ref()`
   method name
 
 ### Phase 006 — Rust transaction handle
 
 Added:
 
-- sanctioned wrapper-owned `Bouncer::transaction()` path in
-  `packages/bouncer`
+- sanctioned wrapper-owned `Litelease::transaction()` path in
+  `packages/litelease`
 - `Transaction<'db>` handle with `inspect`, `claim`, `renew`,
   `release`, `conn()`, `commit()`, and `rollback()`
 - wrapper tests for transaction-handle commit/rollback,
@@ -149,7 +149,7 @@ Added:
 
 Changed:
 
-- `Bouncer::transaction()` now takes `&mut self` and uses the checked
+- `Litelease::transaction()` now takes `&mut self` and uses the checked
   `transaction_with_behavior(TransactionBehavior::Immediate)` path
   instead of `new_unchecked`
 - same-wrapper autocommit calls and a second wrapper-owned transaction
@@ -167,12 +167,12 @@ Added:
   savepoint `renew`, direct savepoint `release`, savepoint commit plus
   outer rollback, and savepoint durability from a fresh connection
 - fresh-connection durability proof for the wrapper transaction handle
-- recommended-default documentation for `Bouncer`,
-  `Bouncer::transaction()`, and `BouncerRef`
+- recommended-default documentation for `Litelease`,
+  `Litelease::transaction()`, and `LiteleaseRef`
 
 Changed:
 
-- `packages/bouncer/src/lib.rs` is split so the public wrapper surface
+- `packages/litelease/src/lib.rs` is split so the public wrapper surface
   stays small and tests live in dedicated modules
 - wrapper semantic-stress tests now use deterministic explicit-time
   core helpers instead of sleeping for expiry
@@ -181,21 +181,21 @@ Changed:
 
 Changed:
 
-- renamed the Rust core crate and directory from `bouncer-honker` to
-  `bouncer-core`
+- renamed the Rust core crate and directory from `litelease-core` to
+  `litelease-core`
 - updated current docs, dependency declarations, and imports so Honker
-  can eventually depend on Bouncer without the dependency direction
+  can eventually depend on Litelease without the dependency direction
   reading backwards
 
 ### Phase 009 — Python binding
 
 Added:
 
-- local-development Python package in `packages/bouncer-py`
-- PyO3 native module exposed as `bouncer._bouncer_native`
+- local-development Python package in `packages/litelease-py`
+- PyO3 native module exposed as `litelease._litelease_native`
 - pure-Python dataclass result shapes for `LeaseInfo`, `ClaimResult`,
   `RenewResult`, and `ReleaseResult`
-- Python `Bouncer` wrapper with explicit `bootstrap()`, `inspect`,
+- Python `Litelease` wrapper with explicit `bootstrap()`, `inspect`,
   `claim`, `renew`, and `release`
 - Python transaction context manager for atomic business writes plus
   lease mutations
@@ -204,8 +204,8 @@ Added:
 - Python tests for lifecycle behavior, transaction commit/rollback,
   context-manager state, parameter binding, error mapping, and SQL
   extension interop on one database file
-- Rust integration test coverage for the built `bouncer-extension`
-  cdylib artifact and every registered `bouncer_*` SQL function
+- Rust integration test coverage for the built `litelease-extension`
+  cdylib artifact and every registered `litelease_*` SQL function
 
 Clarified:
 
@@ -214,28 +214,28 @@ Clarified:
 - the Python binding is binding-owned and does not yet wrap caller-owned
   `sqlite3.Connection` transactions
 - Python `tx.execute` is a single-statement helper and raises
-  `BouncerError` for SQL syntax errors or multi-statement input
+  `LiteleaseError` for SQL syntax errors or multi-statement input
 
 ### Phase 010 — Python binding hardening
 
 Changed:
 
-- `Bouncer.transaction()` no longer eagerly opens `BEGIN IMMEDIATE`;
+- `Litelease.transaction()` no longer eagerly opens `BEGIN IMMEDIATE`;
   the transaction opens inside `Transaction.__enter__`
 - `Transaction` is single-use and context-manager-first; `__enter__`
-  raises `BouncerError` if the transaction is already entered or
+  raises `LiteleaseError` if the transaction is already entered or
   finished, and pre-`__enter__` verb calls raise with a message
   pointing at `with db.transaction() as tx:`
 - if `begin_transaction` fails inside `__enter__`, the `Transaction`
   remains unentered so the same instance can be re-entered after the
   contention clears
 - `Transaction.__del__` is removed; the native
-  `Drop for NativeBouncer` is the only remaining transaction safety
+  `Drop for NativeLitelease` is the only remaining transaction safety
   net
-- `Transaction` is no longer exported from `bouncer.__all__`; users
+- `Transaction` is no longer exported from `litelease.__all__`; users
   reach it only through `db.transaction()`
-- `packages/bouncer-py/Cargo.toml` aligns to Rust edition `2021`,
-  matching `bouncer-core` and `bouncer-extension`
+- `packages/litelease-py/Cargo.toml` aligns to Rust edition `2021`,
+  matching `litelease-core` and `litelease-extension`
 
 Added:
 
@@ -244,11 +244,11 @@ Added:
 - Python tests pinning the entered / unentered / single-use contract
   on `Transaction` and proving that an unentered `Transaction` does
   not hold a SQLite write lock
-- `BouncerError` covers non-lease native errors (a SQL syntax error
-  in `tx.execute` raises `BouncerError`)
+- `LiteleaseError` covers non-lease native errors (a SQL syntax error
+  in `tx.execute` raises `LiteleaseError`)
 - a regression test pinning the rusqlite multi-statement reject
   behavior of `tx.execute`
-- `packages/bouncer-py/README.md` section directing callers who own
+- `packages/litelease-py/README.md` section directing callers who own
   a stdlib `sqlite3.Connection` at the SQL extension path, with a
   working `enable_load_extension` snippet
 - root `README.md` "Choosing a surface" section showing SQL
@@ -258,7 +258,7 @@ Added:
 
 Added:
 
-- `bouncer-core/tests/invariants.rs`, a deterministic core-level
+- `litelease-core/tests/invariants.rs`, a deterministic core-level
   invariant runner over `claim`, `renew`, `release`, `inspect`,
   `owner`, and `token`
 - a seeded xorshift64-style test RNG with no new property-testing
@@ -290,10 +290,10 @@ Clarified:
 
 Added:
 
-- `bouncer-core/tests/sqlite_matrix.rs`, a file-backed SQLite behavior
+- `litelease-core/tests/sqlite_matrix.rs`, a file-backed SQLite behavior
   matrix for direct core calls and the in-process SQL extension surface
-- `packages/bouncer/tests/sqlite_matrix.rs`, a wrapper-only matrix for
-  `Bouncer::transaction()`, `BouncerRef`, typed `Savepoint`, and a WAL
+- `packages/litelease/tests/sqlite_matrix.rs`, a wrapper-only matrix for
+  `Litelease::transaction()`, `LiteleaseRef`, typed `Savepoint`, and a WAL
   autocommit lease-busy row
 - fresh-tempdir-per-row coverage for autocommit, deferred `BEGIN`,
   `BEGIN IMMEDIATE`, savepoints, two connections, `busy_timeout = 0`,
@@ -304,7 +304,7 @@ Added:
 
 Changed:
 
-- `bouncer-core::attach_bouncer_functions` now preserves underlying
+- `litelease-core::attach_litelease_functions` now preserves underlying
   SQLite `BUSY` / `LOCKED` errors where the scalar-function boundary
   allows it instead of eagerly string-wrapping every SQLite failure as
   `UserFunctionError`
@@ -322,19 +322,19 @@ Clarified:
 
 Added:
 
-- strict bootstrap-time schema validation in `bouncer-core` for
-  preexisting `bouncer_resources` tables
+- strict bootstrap-time schema validation in `litelease-core` for
+  preexisting `litelease_resources` tables
 - public `Error::SchemaMismatch { reason: String }` for incompatible
   persisted schema drift
-- `bouncer-core/tests/integrity.rs`, a file-backed hardening suite for
+- `litelease-core/tests/integrity.rs`, a file-backed hardening suite for
   schema drift, invalid persisted rows, token near-overflow, TTL edges,
   bootstrap idempotency, existing-live-lease preservation, and unusual
   text round-trip behavior
 
 Changed:
 
-- `bootstrap_bouncer_schema(conn)` no longer silently accepts arbitrary
-  preexisting `bouncer_resources` table shapes; it now fails loudly when
+- `bootstrap_litelease_schema(conn)` no longer silently accepts arbitrary
+  preexisting `litelease_resources` table shapes; it now fails loudly when
   the persisted schema drifts from the proved contract
 - schema matching is intentionally strict in this phase: exact six
   columns, column order, declared type text, required nullability,
@@ -357,12 +357,12 @@ Clarified:
 
 Added:
 
-- `bouncer-core/tests/pragma_matrix.rs`, a file-backed pragma-neutrality
+- `litelease-core/tests/pragma_matrix.rs`, a file-backed pragma-neutrality
   matrix for core bootstrap/mutators plus SQL registration and SQL
   function calls
-- `packages/bouncer/tests/pragma_matrix.rs`, a wrapper pragma-neutrality
+- `packages/litelease/tests/pragma_matrix.rs`, a wrapper pragma-neutrality
   matrix for wrapper-owned bootstrap, borrowed mutators,
-  `Bouncer::transaction()`, and typed savepoints
+  `Litelease::transaction()`, and typed savepoints
 - a compact root `README.md` safety-rails section covering lease busy
   versus SQLite busy/locked, `BEGIN IMMEDIATE`, pragma ownership,
   fencing-token obligations, and strict bootstrap drift rejection
@@ -372,7 +372,7 @@ Clarified:
 - pragma-neutrality is now directly proved for the pinned five-pragmas
   set: `journal_mode`, `synchronous`, `busy_timeout`, `locking_mode`,
   and `foreign_keys`
-- Bouncer does not set or normalize caller-owned pragma policy as a
+- Litelease does not set or normalize caller-owned pragma policy as a
   side effect of bootstrap or lease operations across the sanctioned
   core, SQL, and wrapper surfaces
 
@@ -380,16 +380,16 @@ Clarified:
 
 Added:
 
-- `packages/bouncer/tests/user_journeys.rs`, a direct public-surface
+- `packages/litelease/tests/user_journeys.rs`, a direct public-surface
   acceptance suite covering fresh bootstrap + first claim,
   second-caller busy, release/reclaim token increase,
   deterministic expiry/reclaim token increase, cross-surface state
   visibility, caller-owned transaction atomic visibility, and loud
   drifted-schema bootstrap failure
 - Python acceptance rows in
-  `packages/bouncer-py/tests/test_bouncer.py` for cross-surface state
+  `packages/litelease-py/tests/test_bouncer.py` for cross-surface state
   visibility and loud drifted-schema bootstrap failure
-- `packages/bouncer/examples/three_surface_observer.rs`, a small
+- `packages/litelease/examples/three_surface_observer.rs`, a small
   wrapper observer used by the Python acceptance suite to directly
   prove Rust wrapper / SQL extension / Python binding interoperability
   on one database file

@@ -43,16 +43,16 @@ make smoke-ext
 
 If you want the quickest hands-on path, start with:
 
-- [bouncer-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.sql)
-- [bouncer-extension/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.py)
-- [packages/bouncer/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/basic_claim.rs)
+- [litelease-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/litelease-extension/examples/basic_claim.sql)
+- [litelease-extension/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/litelease-extension/examples/basic_claim.py)
+- [packages/litelease/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/litelease/examples/basic_claim.rs)
 
 ## How do I install it?
 
 Today the cleanest way to use Litelease is still from source.
 
-- **SQL extension**: build `bouncer-extension` and load the resulting
-  `libbouncer_ext.{dylib,so,dll}` into the SQLite connection you already
+- **SQL extension**: build `litelease-extension` and load the resulting
+  `liblitelease_ext.{dylib,so,dll}` into the SQLite connection you already
   own
 - **Rust wrapper**: use the `litelease` crate from this repo today
 - **Python**: use stdlib `sqlite3` and load the extension on the
@@ -75,9 +75,9 @@ make dist-ext
 That produces a current-platform asset in `dist/` with a stable name
 like:
 
-- `bouncer-extension-linux-x86_64.so`
-- `bouncer-extension-macos-arm64.dylib`
-- `bouncer-extension-windows-x86_64.dll`
+- `litelease-extension-linux-x86_64.so`
+- `litelease-extension-macos-arm64.dylib`
+- `litelease-extension-windows-x86_64.dll`
 
 and a matching `.sha256` file beside it.
 
@@ -135,7 +135,7 @@ caller’s job.
 
 ## Design at a glance
 
-Litelease stores lease state in one table, `bouncer_resources`. Each
+Litelease stores lease state in one table, `litelease_resources`. Each
 resource row tracks a `name`, an `owner`, a monotonic `token`, and
 `lease_expires_at_ms`.
 
@@ -157,14 +157,14 @@ All shipped surfaces share one schema and one lease state machine.
 | Surface | Who owns the SQLite connection? | Best for |
 |---|---|---|
 | SQL extension | caller | any app that already owns the SQLite connection |
-| Rust `Bouncer` | wrapper-owned connection | normal Rust apps that want typed results |
-| Rust `BouncerRef` | caller | Rust code that already owns a `rusqlite::Connection` or transaction |
+| Rust `Litelease` | wrapper-owned connection | normal Rust apps that want typed results |
+| Rust `LiteleaseRef` | caller | Rust code that already owns a `rusqlite::Connection` or transaction |
 
 The shortest rule is:
 
 - if **you** already own the SQLite connection, use the **SQL extension**
-- if you are in **Rust** and want a wrapper-owned path, use **`Bouncer`**
-- if you are in **Rust** and already own the connection, use **`BouncerRef`**
+- if you are in **Rust** and want a wrapper-owned path, use **`Litelease`**
+- if you are in **Rust** and already own the connection, use **`LiteleaseRef`**
 - if you are in **Python**, use stdlib `sqlite3` plus the **SQL extension**
 
 ### SQL extension
@@ -173,10 +173,10 @@ Use this when you already own the SQLite connection and want Litelease to
 participate on that exact connection.
 
 ```sql
-SELECT bouncer_bootstrap();
-SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
-SELECT bouncer_owner('scheduler', 1700000000000);
-SELECT bouncer_token('scheduler');
+SELECT litelease_bootstrap();
+SELECT litelease_claim('scheduler', 'worker-a', 30000, 1700000000000);
+SELECT litelease_owner('scheduler', 1700000000000);
+SELECT litelease_token('scheduler');
 ```
 
 Tiny transaction example:
@@ -184,19 +184,19 @@ Tiny transaction example:
 ```sql
 BEGIN IMMEDIATE;
 INSERT INTO jobs(payload) VALUES ('work');
-SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
+SELECT litelease_claim('scheduler', 'worker-a', 30000, 1700000000000);
 COMMIT;
 ```
 
 The SQL surface keeps time explicit. You pass `now_ms` yourself. The SQL
-prefix is still `bouncer_*` today.
+prefix is still `litelease_*` today.
 
 See also:
 
-- [bouncer-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.sql)
-- [bouncer-extension/examples/transactional_claim.sql](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/transactional_claim.sql)
-- [bouncer-extension/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/basic_claim.py)
-- [bouncer-extension/examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/bouncer-extension/examples/transactional_claim.py)
+- [litelease-extension/examples/basic_claim.sql](/Users/russellromney/Documents/Github/bouncer/litelease-extension/examples/basic_claim.sql)
+- [litelease-extension/examples/transactional_claim.sql](/Users/russellromney/Documents/Github/bouncer/litelease-extension/examples/transactional_claim.sql)
+- [litelease-extension/examples/basic_claim.py](/Users/russellromney/Documents/Github/bouncer/litelease-extension/examples/basic_claim.py)
+- [litelease-extension/examples/transactional_claim.py](/Users/russellromney/Documents/Github/bouncer/litelease-extension/examples/transactional_claim.py)
 
 ### Rust wrapper
 
@@ -206,9 +206,9 @@ sanctioned transaction/savepoint surface.
 ```rust
 use std::time::Duration;
 
-use litelease::{Bouncer, ClaimResult};
+use litelease::{Litelease, ClaimResult};
 
-let db = Bouncer::open("app.sqlite3")?;
+let db = Litelease::open("app.sqlite3")?;
 db.bootstrap()?;
 
 match db.claim("scheduler", "worker-a", Duration::from_secs(30))? {
@@ -224,11 +224,11 @@ match db.claim("scheduler", "worker-a", Duration::from_secs(30))? {
 
 See also:
 
-- [packages/bouncer/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/basic_claim.rs)
-- [packages/bouncer/examples/transactional_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/bouncer/examples/transactional_claim.rs)
+- [packages/litelease/examples/basic_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/litelease/examples/basic_claim.rs)
+- [packages/litelease/examples/transactional_claim.rs](/Users/russellromney/Documents/Github/bouncer/packages/litelease/examples/transactional_claim.rs)
 
-The published Rust crate is `litelease`. `Bouncer` is still the main
-wrapper type, and `BouncerRef` is the lower-level
+The published Rust crate is `litelease`. `Litelease` is still the main
+wrapper type, and `LiteleaseRef` is the lower-level
 integration surface when your code already owns the `rusqlite::Connection`
 or the current transaction/savepoint boundary.
 
@@ -244,12 +244,12 @@ import sqlite3
 conn = sqlite3.connect("app.sqlite3")
 conn.enable_load_extension(True)
 # Load the exact asset you built or downloaded.
-# Example: dist/bouncer-extension-macos-arm64.dylib
-conn.load_extension("dist/bouncer-extension-macos-arm64.dylib")
+# Example: dist/litelease-extension-macos-arm64.dylib
+conn.load_extension("dist/litelease-extension-macos-arm64.dylib")
 
-conn.execute("SELECT bouncer_bootstrap()")
+conn.execute("SELECT litelease_bootstrap()")
 token = conn.execute(
-    "SELECT bouncer_claim(?, ?, ?, ?)",
+    "SELECT litelease_claim(?, ?, ?, ?)",
     ("scheduler", "worker-a", 30_000, 1_700_000_000_000),
 ).fetchone()[0]
 
@@ -278,7 +278,7 @@ SQL transaction example:
 ```sql
 BEGIN IMMEDIATE;
 INSERT INTO jobs(payload) VALUES ('work');
-SELECT bouncer_claim('scheduler', 'worker-a', 30000, 1700000000000);
+SELECT litelease_claim('scheduler', 'worker-a', 30000, 1700000000000);
 COMMIT;
 ```
 
@@ -287,10 +287,10 @@ Rust wrapper example:
 ```rust
 use std::time::Duration;
 
-use litelease::{Bouncer, ClaimResult};
+use litelease::{Litelease, ClaimResult};
 use rusqlite::params;
 
-let mut db = Bouncer::open("app.sqlite3")?;
+let mut db = Litelease::open("app.sqlite3")?;
 db.bootstrap()?;
 
 let tx = db.transaction()?;
@@ -312,7 +312,7 @@ Python `sqlite3` example:
 conn.execute("BEGIN IMMEDIATE")
 conn.execute("INSERT INTO jobs(payload) VALUES (?)", ("work",))
 token = conn.execute(
-    "SELECT bouncer_claim(?, ?, ?, ?)",
+    "SELECT litelease_claim(?, ?, ?, ?)",
     ("scheduler", "worker-a", 30_000, 1_700_000_000_000),
 ).fetchone()[0]
 conn.commit()
@@ -342,7 +342,7 @@ These are the sharp edges worth remembering.
 
 If another owner already holds a live lease, Litelease returns a lease
 busy result: Rust gives `ClaimResult::Busy`, and SQL returns `NULL`
-from `bouncer_claim(...)`. That is different from SQLite `BUSY` /
+from `litelease_claim(...)`. That is different from SQLite `BUSY` /
 `LOCKED`, which means writer contention or deferred lock-upgrade
 failure.
 
@@ -351,11 +351,11 @@ failure.
 Litelease does not set or normalize your connection policy. The current
 proved set is `journal_mode`, `synchronous`, `busy_timeout`,
 `locking_mode`, and `foreign_keys`. Set them yourself before calling
-`bootstrap()` or before handing a connection to `BouncerRef`.
+`bootstrap()` or before handing a connection to `LiteleaseRef`.
 
 ### Bootstrap is strict
 
-If `bouncer_resources` already exists with the wrong shape, bootstrap
+If `litelease_resources` already exists with the wrong shape, bootstrap
 fails loudly with `SchemaMismatch`. Litelease is not a migration engine
 and does not silently accept drifted schema.
 
@@ -392,14 +392,14 @@ through your side-effect boundary.
 
 Use the SQL extension when you already own the SQLite connection. Use
 the Rust wrapper when you want a friendlier typed Rust API on a
-wrapper-owned connection. Use `BouncerRef` when Rust already owns the
+wrapper-owned connection. Use `LiteleaseRef` when Rust already owns the
 connection and you want Litelease to participate in that exact SQLite
 boundary.
 
 ### What should Python users do?
 
 Use stdlib `sqlite3`, enable extension loading, and load
-`libbouncer_ext`. That keeps Python on the same base surface as every
+`liblitelease_ext`. That keeps Python on the same base surface as every
 other caller-owned SQLite integration instead of adding a second Python
 API.
 
@@ -422,11 +422,11 @@ expiry handoff, and caller-owned transaction participation.
 
 ## Repository map
 
-- [bouncer-core](/Users/russellromney/Documents/Github/bouncer/bouncer-core)
+- [litelease-core](/Users/russellromney/Documents/Github/bouncer/litelease-core)
   Rust core owning schema and lease semantics
-- [bouncer-extension](/Users/russellromney/Documents/Github/bouncer/bouncer-extension)
+- [litelease-extension](/Users/russellromney/Documents/Github/bouncer/litelease-extension)
   SQLite loadable extension
-- [packages/bouncer](/Users/russellromney/Documents/Github/bouncer/packages/bouncer)
+- [packages/litelease](/Users/russellromney/Documents/Github/bouncer/packages/litelease)
   Rust wrapper
 
 ## Development

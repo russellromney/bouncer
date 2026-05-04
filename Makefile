@@ -10,10 +10,10 @@ help:
 	@echo "  make test        - alias for test-rust"
 
 test-rust:
-	cargo test -p litelease -p bouncer-core
+	cargo test -p litelease -p litelease-core
 
 build-ext:
-	cargo build -p bouncer-extension --release
+	cargo build -p litelease-extension --release
 
 dist-ext: build-ext
 	./scripts/stage_extension_dist.sh

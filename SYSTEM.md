@@ -10,8 +10,8 @@ should be recorded in phase artifacts before the code drifts.
 
 ## Core Contract
 
-`bouncer-core` owns the schema and lease semantics. It installs a
-`bouncer_resources` table and exposes `inspect`, `claim`, `renew`, and
+`litelease-core` owns the schema and lease semantics. It installs a
+`litelease_resources` table and exposes `inspect`, `claim`, `renew`, and
 `release`.
 
 A resource row persists after the first successful claim. Expiry and release
@@ -36,8 +36,8 @@ transaction and open `BEGIN IMMEDIATE`. `claim_in_tx`, `renew_in_tx`, and
 `release_in_tx` reuse a caller-owned transaction or savepoint and fail fast with
 `Error::NotInTransaction` when called on an autocommit connection.
 
-`bootstrap_bouncer_schema(conn)` now has a strict persisted-schema contract.
-On a fresh database it creates `bouncer_resources`. On an existing database it
+`bootstrap_litelease_schema(conn)` now has a strict persisted-schema contract.
+On a fresh database it creates `litelease_resources`. On an existing database it
 validates the current table shape and fails loudly with
 `Error::SchemaMismatch { reason }` if the table has drifted from the proved
 schema. The current contract is exact six-column shape, column order, declared
@@ -57,18 +57,18 @@ returns `Error::InvalidLeaseRow(...)` instead of partially operating on it.
 
 ## SQL Extension
 
-`bouncer-extension` is a SQLite loadable extension. The registration code lives
-in `bouncer-core::attach_bouncer_functions`, so SQL callers and Rust callers
+`litelease-extension` is a SQLite loadable extension. The registration code lives
+in `litelease-core::attach_litelease_functions`, so SQL callers and Rust callers
 share the same lease state machine.
 
 The SQL surface is:
 
-- `bouncer_bootstrap()`
-- `bouncer_claim(name, owner, ttl_ms, now_ms)`
-- `bouncer_renew(name, owner, ttl_ms, now_ms)`
-- `bouncer_release(name, owner, now_ms)`
-- `bouncer_owner(name, now_ms)`
-- `bouncer_token(name)`
+- `litelease_bootstrap()`
+- `litelease_claim(name, owner, ttl_ms, now_ms)`
+- `litelease_renew(name, owner, ttl_ms, now_ms)`
+- `litelease_release(name, owner, now_ms)`
+- `litelease_owner(name, now_ms)`
+- `litelease_token(name)`
 
 The SQL surface keeps time explicit and does not read SQLite's current time.
 Mutating SQL functions work in autocommit mode and inside an already-open
@@ -77,7 +77,7 @@ transaction or savepoint. In autocommit mode they preserve the core
 that boundary, so lock-upgrade timing follows the caller's outer transaction
 mode.
 
-When a `bouncer_*` SQL function hits an underlying SQLite lock failure,
+When a `litelease_*` SQL function hits an underlying SQLite lock failure,
 SQLite/rusqlite can collapse some UDF callback lock failures to a generic
 `SQLITE_ERROR` while preserving only busy/locked text. Outside that known
 scalar-function boundary quirk, Litelease preserves the native SQLite
@@ -86,22 +86,22 @@ semantic.
 
 ## Rust Wrapper
 
-`packages/bouncer` is the Rust convenience wrapper. It exposes an owned
-`Bouncer`, a borrowed `BouncerRef<'a>`, a wrapper-owned `Transaction<'db>`, and
+`packages/litelease` is the Rust convenience wrapper. It exposes an owned
+`Litelease`, a borrowed `LiteleaseRef<'a>`, a wrapper-owned `Transaction<'db>`, and
 a `Savepoint<'db>`.
 
-The recommended default is `Bouncer` for simple autocommit lease operations.
-Use `Bouncer::transaction()` when business writes and lease mutations must
-commit or roll back together. Use `BouncerRef` when the caller already owns the
+The recommended default is `Litelease` for simple autocommit lease operations.
+Use `Litelease::transaction()` when business writes and lease mutations must
+commit or roll back together. Use `LiteleaseRef` when the caller already owns the
 SQLite connection or current transaction/savepoint state.
 
 Wrapper convenience methods read system time for lease expiry bookkeeping only.
-`BouncerRef` mutators mirror the SQL extension transaction model: in
+`LiteleaseRef` mutators mirror the SQL extension transaction model: in
 autocommit mode they open their own `BEGIN IMMEDIATE` through the core helpers;
 inside an existing transaction or savepoint they reuse the caller's current
 atomic boundary.
 
-`Bouncer::transaction()` uses Rust borrow exclusivity to prevent same-wrapper
+`Litelease::transaction()` uses Rust borrow exclusivity to prevent same-wrapper
 autocommit calls or a second wrapper-owned transaction from overlapping the
 open transaction on that connection. The transaction handle exposes `inspect`,
 `claim`, `renew`, `release`, `conn()`, `commit()`, `rollback()`, and
@@ -148,7 +148,7 @@ state unchanged when deferred lock upgrade fails before the mutation can land.
 
 The core also now has a file-backed integrity hardening suite. It proves:
 
-- strict bootstrap rejection for drifted `bouncer_resources` schema
+- strict bootstrap rejection for drifted `litelease_resources` schema
 - bootstrap idempotency on a valid current-shape schema
 - bootstrap preserving an existing live lease on a valid schema
 - loud failure on invalid persisted rows
@@ -163,8 +163,8 @@ renew/release, savepoint commit plus outer rollback, and deterministic
 explicit-time semantic stress.
 
 Wrapper matrix rows now prove the sanctioned wrapper boundaries follow that
-same SQLite story rather than inventing one: `Bouncer::transaction()` claims
-writer intent up front, `BouncerRef` mirrors deferred lock-upgrade behavior,
+same SQLite story rather than inventing one: `Litelease::transaction()` claims
+writer intent up front, `LiteleaseRef` mirrors deferred lock-upgrade behavior,
 typed `Savepoint` commit participates in the outer transaction boundary, and
 wrapper autocommit lease-busy behavior stays stable under `journal_mode = WAL`.
 
@@ -175,8 +175,8 @@ They prove Litelease does not rewrite the pinned caller-owned pragma set
 calls, wrapper bootstrap, borrowed-path mutators, wrapper-owned transaction
 mutators, and typed savepoints.
 
-Rust tests also build and load the `bouncer-extension` cdylib through rusqlite
-and exercise every `bouncer_*` function.
+Rust tests also build and load the `litelease-extension` cdylib through rusqlite
+and exercise every `litelease_*` function.
 
 The extension also now has a release-shaped smoke path. The Rust test
 suite proves that the release-built shared library under
